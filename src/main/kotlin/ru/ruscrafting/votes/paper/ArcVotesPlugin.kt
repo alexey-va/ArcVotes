@@ -22,7 +22,9 @@ import ru.ruscrafting.votes.callback.ArcVoteHttpServer
 import ru.ruscrafting.votes.callback.VoteIngressService
 import ru.ruscrafting.votes.command.VoteCommand
 import ru.ruscrafting.votes.config.ArcVotesSettings
+import ru.ruscrafting.votes.domain.RewardProvider
 import ru.ruscrafting.votes.reward.VoteRewardService
+import ru.ruscrafting.votes.reward.VaultRedisEconomyRewardDepositor
 import ru.ruscrafting.votes.storage.MySqlVoteRepository
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
@@ -36,6 +38,7 @@ class ArcVotesPlugin : JavaPlugin() {
     private val sqlReady = AtomicBoolean(false)
     private val httpReady = AtomicBoolean(false)
     private val vaultReady = AtomicBoolean(false)
+    private val redisEconomyReady = AtomicBoolean(false)
     private val debug = StructuredDebugLine("ARCVOTES_EVENT")
 
     override fun onEnable() {
@@ -63,10 +66,22 @@ class ArcVotesPlugin : JavaPlugin() {
 
             val rewardService = if (settings.reward.enabled) {
                 val storage = requireNotNull(repository) { "Vote reward storage is unavailable" }
-                val economy = requireNotNull(server.servicesManager.getRegistration(Economy::class.java)?.provider) {
-                    "Vault economy service is required while rewards are enabled"
-                }
+                val reward = requireNotNull(settings.reward.bundle)
+                val requiresVault = reward.components.any { it.provider == RewardProvider.VAULT }
+                val economy = server.servicesManager.getRegistration(Economy::class.java)?.provider
+                require(!requiresVault || economy != null) { "Vault economy service is required for standard vote rewards" }
                 vaultReady.set(true)
+                val redisEconomyClassLoader = if (reward.components.any { it.provider == RewardProvider.REDIS_ECONOMY }) {
+                    requireNotNull(server.pluginManager.getPlugin("RedisEconomy")) {
+                        "RedisEconomy plugin is required for premium vote rewards"
+                    }.javaClass.classLoader
+                } else null
+                val depositor = VaultRedisEconomyRewardDepositor.create(
+                    vault = economy,
+                    redisEconomyClassLoader = redisEconomyClassLoader,
+                    reward = reward,
+                )
+                redisEconomyReady.set(true)
                 val sql = requireNotNull(sqlRuntime)
                 val ledger = runtime.own(
                     MySqlOneTimeUseLedger.attach(
@@ -75,8 +90,9 @@ class ArcVotesPlugin : JavaPlugin() {
                         partition = MySqlOneTimeUsePartition("vote_reward"),
                     ),
                 )
-                VoteRewardService(server, runtime.tasks, storage, ledger, economy, settings, locale, logger).also {
+                VoteRewardService(server, runtime.tasks, storage, ledger, depositor, settings, locale, logger).also {
                     server.pluginManager.registerEvents(it, this)
+                    it.start()
                 }
             } else null
 
@@ -127,6 +143,7 @@ class ArcVotesPlugin : JavaPlugin() {
         sqlReady.set(false)
         httpReady.set(false)
         vaultReady.set(false)
+        redisEconomyReady.set(false)
         ConfigManager.clear()
         Tasks.reset()
     }
@@ -136,10 +153,16 @@ class ArcVotesPlugin : JavaPlugin() {
             val mysql = settings.sql == null || sqlReady.get()
             val http = !settings.http.enabled || httpReady.get()
             val vault = !settings.reward.enabled || vaultReady.get()
+            val redisEconomy = !settings.reward.enabled || redisEconomyReady.get()
             RuntimeHealthContribution(
-                state = if (mysql && http && vault) RuntimeHealthState.UP else RuntimeHealthState.DOWN,
-                schemas = mapOf("votes" to 2),
-                dependencies = mapOf("mysql" to mysql, "callback_http" to http, "vault" to vault),
+                state = if (mysql && http && vault && redisEconomy) RuntimeHealthState.UP else RuntimeHealthState.DOWN,
+                schemas = mapOf("votes" to 3),
+                dependencies = mapOf(
+                    "mysql" to mysql,
+                    "callback_http" to http,
+                    "vault" to vault,
+                    "redis_economy" to redisEconomy,
+                ),
             )
         }
     }

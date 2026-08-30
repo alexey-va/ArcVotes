@@ -10,7 +10,7 @@ import java.time.Instant
 import java.util.UUID
 
 class VoteEventTest : StringSpec({
-    "one-time reward identity is stable and binds source, player and amount" {
+    "component identities are stable, independent and bind provider amounts" {
         val id = UUID.randomUUID()
         val vote = AuthenticatedVote(
             MonitoringSource.HOTMC,
@@ -18,11 +18,15 @@ class VoteEventTest : StringSpec({
             NetworkPlayerName.of("Steve"),
             Instant.EPOCH,
         )
-        val first = VoteEvent(id, vote, Instant.EPOCH, BigDecimal("100.00"), RewardState.PENDING)
+        val standard = VoteRewardComponent("standard", RewardProvider.VAULT, BigDecimal("1000.00"))
+        val premium = VoteRewardComponent("premium", RewardProvider.REDIS_ECONOMY, BigDecimal("3.00"), "tokens")
+        val first = VoteEvent(id, vote, Instant.EPOCH, VoteRewardBundle(listOf(standard, premium)), RewardState.PENDING)
         val same = first.copy(receivedAt = Instant.ofEpochSecond(10))
-        val changed = first.copy(rewardAmount = BigDecimal("200.00"))
+        val changedPremium = premium.copy(amount = BigDecimal("4.00"))
+        val changed = first.copy(reward = VoteRewardBundle(listOf(standard, changedPremium)))
 
-        first.oneTimeUseIdentity() shouldBe same.oneTimeUseIdentity()
-        first.oneTimeUseIdentity() shouldNotBe changed.oneTimeUseIdentity()
+        first.oneTimeUseIdentity(standard) shouldBe same.oneTimeUseIdentity(standard)
+        first.oneTimeUseIdentity(premium) shouldNotBe changed.oneTimeUseIdentity(changedPremium)
+        first.oneTimeUseIdentity(standard).useId shouldNotBe first.oneTimeUseIdentity(premium).useId
     }
 })

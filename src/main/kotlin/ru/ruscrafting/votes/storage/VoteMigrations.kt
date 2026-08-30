@@ -32,8 +32,32 @@ object VoteMigrations {
         ),
     )
 
+    val REWARD_COMPONENTS = SqlMigration(
+        version = 3,
+        description = "create configurable vote reward components",
+        statements = listOf(
+            """
+            CREATE TABLE IF NOT EXISTS `arc_votes_reward_components` (
+                `event_uuid` BINARY(16) NOT NULL,
+                `component_key` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                `provider` VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                `currency_id` VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+                `amount` DECIMAL(20,2) NOT NULL,
+                PRIMARY KEY (`event_uuid`, `component_key`),
+                CONSTRAINT `arc_votes_reward_component_event_fk`
+                    FOREIGN KEY (`event_uuid`) REFERENCES `arc_votes_events` (`event_uuid`) ON DELETE CASCADE,
+                CONSTRAINT `arc_votes_reward_provider_chk`
+                    CHECK (`provider` IN ('vault', 'redis_economy')),
+                CONSTRAINT `arc_votes_reward_amount_chk`
+                    CHECK (`amount` > 0 AND `amount` <= 1000000.00)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """.trimIndent(),
+        ),
+    )
+
     val ALL = listOf(
         EVENTS,
         MySqlOneTimeUseLedger.createTableMigration(version = 2),
+        REWARD_COMPONENTS,
     )
 }

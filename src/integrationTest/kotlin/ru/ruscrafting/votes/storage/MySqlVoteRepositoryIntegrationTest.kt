@@ -13,7 +13,10 @@ import ru.arc.testing.containers.MySqlTestService
 import ru.arc.testing.containers.MySqlTestSettings
 import ru.ruscrafting.votes.config.MonitoringSource
 import ru.ruscrafting.votes.domain.AuthenticatedVote
+import ru.ruscrafting.votes.domain.RewardProvider
 import ru.ruscrafting.votes.domain.VoteRecordResult
+import ru.ruscrafting.votes.domain.VoteRewardBundle
+import ru.ruscrafting.votes.domain.VoteRewardComponent
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
@@ -54,15 +57,26 @@ class MySqlVoteRepositoryIntegrationTest : FreeSpec({
             NetworkPlayerName.of("Steve"),
             Instant.parse("2026-08-30T12:00:00Z"),
         )
-        val inserted = repository.record(vote, BigDecimal("100.00")).join()
+        val reward = VoteRewardBundle(
+            listOf(
+                VoteRewardComponent("standard", RewardProvider.VAULT, BigDecimal("1000.00")),
+                VoteRewardComponent("premium", RewardProvider.REDIS_ECONOMY, BigDecimal("3.00"), "tokens"),
+            ),
+        )
+        val inserted = repository.record(vote, reward).join()
             .shouldBeInstanceOf<VoteRecordResult.Inserted>()
-        repository.record(vote, BigDecimal("100.00")).join()
+        repository.record(vote, reward).join()
             .shouldBeInstanceOf<VoteRecordResult.Duplicate>().event.id shouldBe inserted.event.id
 
         val forged = vote.copy(playerName = NetworkPlayerName.of("Alex"))
-        repository.record(forged, BigDecimal("100.00")).join() shouldBe VoteRecordResult.IdentityConflict
+        repository.record(forged, reward).join() shouldBe VoteRecordResult.IdentityConflict
 
-        repository.findPending(NetworkPlayerName.of("sTeVe")).join() shouldHaveSize 1
+        val pending = repository.findPending(NetworkPlayerName.of("sTeVe")).join()
+        pending shouldHaveSize 1
+        pending.single().reward shouldBe reward
+        repository.findPendingForPlayers(
+            setOf(NetworkPlayerName.of("Steve"), NetworkPlayerName.of("Alex")),
+        ).join().getValue("steve") shouldHaveSize 1
         repository.markGranted(inserted.event.id, UUID.randomUUID()).join() shouldBe true
         repository.findPending(NetworkPlayerName.of("Steve")).join().shouldBeEmpty()
     }

@@ -8,7 +8,7 @@ commands:
     - '<#82c7ae>◆ <monitoring_minecraft></color> <#d9bda0>— open</color>'
     - '<#b29bd4>◆ <game_monitoring></color> <#d9bda0>— open</color>'
     - '<reset>'
-  reward-note: '<#ffd9b3>Use your in-game name</color> <#ff8fa3>·</color> <#fff4e3>the reward arrives on join.</color>'
+  reward-note: '<#ffd9b3>In-game name</color> <#ff8fa3>·</color> <#fff4e3>reward in a few seconds.</color>'
   open-hint: '<#fff4e3>Click to open <site></color>'
   no-permission: '<prefix> <#ff8f7a>You do not have permission.</color>'
   help: '<prefix> <#fff4e3>Usage:</color> <#ffcf70>/vote</color>'
@@ -29,4 +29,9 @@ commands:
     - '<#ffd9b3>Accepted:</color> <accepted> <#ff8fa3>·</color> <#ffd9b3>duplicates:</color> <duplicates>'
     - '<#ffd9b3>Rejected:</color> <rejected> <#ff8fa3>·</color> <#ffd9b3>API failures:</color> <upstream_failures>'
 reward:
-  granted: '<prefix> <#8fe1c2><bold>Thank you!</bold></color> <#fff4e3>Your <site> vote was recorded.</color> <#ff8fa3><bold>+<amount> <currency></bold></color>'
+  granted:
+    - '<prefix> <#fff4e3>Your <site> vote was recorded.</color>'
+    - '  <rewards>'
+  component-standard: '<#8fe1c2><bold>+<amount> coins</bold></color>'
+  component-premium: '<#e7bd72><bold>+<amount> tokens</bold></color>'
+  component-separator: ' <#d9bda0>·</color> '

@@ -8,6 +8,10 @@ Handlers cap the body before parsing, reject duplicate fields and unsupported me
 
 ## State and reward flow
 
-`arc_votes_events` owns the normalized callback intent. `(source, external_id)` is unique, so provider retries are idempotent. A player receives a reward only while online. Before Vault is called, ArcVotes claims the event UUID in the shared `arc_one_time_uses` ledger. Known pre-mutation failures release the claim; successful deposits commit it; unknown outcomes are abandoned and retained for operator reconciliation instead of being retried automatically.
+`arc_votes_events` owns the normalized callback intent. `(source, external_id)` is unique, so provider retries are idempotent. `arc_votes_reward_components` snapshots every configured effect at callback time; existing pre-component rows retain their legacy Vault-only snapshot.
+
+Each Paper node periodically takes a main-thread snapshot of online names and issues one bounded asynchronous SQL query for their `PENDING` events. Per-player execution is serialized. Every reward component derives its own stable one-time-use identity before value mutation, so a committed standard deposit is not repeated while a premium component retries. Known pre-mutation failures release only that component claim; successful deposits commit it; unknown outcomes move the event to durable operator recovery.
+
+The default currency is applied through Vault. Additional currencies use the exact RedisEconomy API contract discovered from the active provider; startup fails closed when a configured currency is absent or disabled. Paper API and provider mutations remain on the primary thread, while JDBC and ledger storage remain asynchronous.
 
 No Prometheus exporter is created. Health is contributed through `PaperPluginRuntime`, and low-cardinality structured events are written through `arc-core-logging`.

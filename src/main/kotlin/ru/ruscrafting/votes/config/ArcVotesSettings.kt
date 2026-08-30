@@ -4,6 +4,9 @@ import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import ru.arc.sql.SqlConnectionConfig
 import ru.arc.sql.SqlSslMode
+import ru.ruscrafting.votes.domain.RewardProvider
+import ru.ruscrafting.votes.domain.VoteRewardBundle
+import ru.ruscrafting.votes.domain.VoteRewardComponent
 import java.math.BigDecimal
 import java.net.InetAddress
 import java.net.Inet6Address
@@ -40,17 +43,32 @@ data class HttpSettings(
 
 data class RewardSettings(
     val enabled: Boolean,
-    val amount: BigDecimal,
-    val currencyLabel: String,
+    val pollIntervalSeconds: Long,
+    val maximumPendingPerPlayer: Int,
+    val standard: RewardComponentSettings,
+    val premium: RewardComponentSettings,
 ) {
     init {
-        require(amount.signum() > 0 && amount.scale() <= 2 && amount <= BigDecimal("1000000.00")) {
-            "reward.amount must be positive, at most 1000000.00, with at most two decimal places"
-        }
-        require(currencyLabel.length in 1..32 && currencyLabel.none { it == '\n' || it == '\r' || it == '<' || it == '>' }) {
-            "reward.currency-label must be safe plain text"
-        }
+        require(pollIntervalSeconds in 1..300) { "reward.poll-interval-seconds must be between 1 and 300" }
+        require(maximumPendingPerPlayer in 1..64) { "reward.maximum-pending-per-player must be between 1 and 64" }
+        require(!enabled || standard.enabled || premium.enabled) { "At least one vote reward component must be enabled" }
     }
+
+    val bundle: VoteRewardBundle? = if (!enabled) null else VoteRewardBundle(
+        listOfNotNull(standard.component(), premium.component()),
+    )
+}
+
+data class RewardComponentSettings(
+    val enabled: Boolean,
+    val key: String,
+    val provider: RewardProvider,
+    val amount: BigDecimal,
+    val currencyId: String? = null,
+) {
+    private val validated = VoteRewardComponent(key, provider, amount, currencyId)
+
+    fun component(): VoteRewardComponent? = validated.takeIf { enabled }
 }
 
 data class SourcePresentation(
@@ -184,8 +202,21 @@ data class ArcVotesSettings(
                 sql = if (mysqlEnabled) loadSql(config, secrets) else null,
                 reward = RewardSettings(
                     enabled = config.boolean("reward.enabled"),
-                    amount = config.string("reward.amount").trim().toBigDecimal(),
-                    currencyLabel = config.string("reward.currency-label").trim(),
+                    pollIntervalSeconds = config.long("reward.poll-interval-seconds"),
+                    maximumPendingPerPlayer = config.int("reward.maximum-pending-per-player"),
+                    standard = RewardComponentSettings(
+                        enabled = config.boolean("reward.standard.enabled"),
+                        key = "standard",
+                        provider = RewardProvider.VAULT,
+                        amount = config.string("reward.standard.amount").trim().toBigDecimal(),
+                    ),
+                    premium = RewardComponentSettings(
+                        enabled = config.boolean("reward.premium.enabled"),
+                        key = "premium",
+                        provider = RewardProvider.REDIS_ECONOMY,
+                        amount = config.string("reward.premium.amount").trim().toBigDecimal(),
+                        currencyId = config.string("reward.premium.currency-id").trim(),
+                    ),
                 ),
                 minecraftRating = loadSignedForm(config, secrets, MonitoringSource.MINECRAFT_RATING),
                 hotMc = loadSignedForm(config, secrets, MonitoringSource.HOTMC),

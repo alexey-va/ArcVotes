@@ -12,7 +12,7 @@ sources:
   votes:
     path: src/main/resources/lang/ru.yml
     prefix-key: prefix
-    exclude: [prefix]
+    exclude: [prefix, reward.component-standard, reward.component-premium, reward.component-separator]
 
 placeholders:
   minecraft_rating: '<underlined>MinecraftRating</underlined>'
@@ -20,8 +20,8 @@ placeholders:
   monitoring_minecraft: '<underlined>MonitoringMinecraft</underlined>'
   game_monitoring: '<underlined>GameMonitoring</underlined>'
   site: HotMC
-  amount: '100'
-  currency: монет
+  amount: '1000'
+  rewards: '<#8fe1c2><bold>+1000 монет</bold></color> <#d9bda0>·</color> <#e7bd72><bold>+3 жетона</bold></color>'
   http: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
   mysql: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
   reward: '<#ff8f7a><bold>— ВЫКЛ</bold></color>'
@@ -39,4 +39,4 @@ surfaces:
     - source: votes
       include:
         - commands.*
-        - reward.*
+        - reward.granted

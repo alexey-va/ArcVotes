@@ -1,6 +1,7 @@
 package ru.ruscrafting.votes.reward
 
-import net.milkbowl.vault.economy.Economy
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.JoinConfiguration
 import org.bukkit.Server
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
@@ -8,6 +9,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerJoinEvent
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.whenCompleteSync
+import ru.arc.network.NetworkPlayerName
 import ru.arc.observability.StructuredDebugLine
 import ru.arc.onetime.OneTimeUseAbandonResult
 import ru.arc.onetime.OneTimeUseClaim
@@ -20,26 +22,45 @@ import ru.arc.onetime.OneTimeUseScope
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.domain.RewardState
 import ru.ruscrafting.votes.domain.VoteEvent
+import ru.ruscrafting.votes.domain.VoteRewardComponent
 import ru.ruscrafting.votes.storage.VoteRepository
 import ru.ruscrafting.votes.text.VoteLocale
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 import java.util.logging.Logger
 
+/**
+ * Owns online vote reward reconciliation for one Paper runtime.
+ *
+ * Bukkit player discovery and provider mutations stay on the primary thread;
+ * repository and ledger calls complete asynchronously. One periodic query is
+ * bounded to currently online names, and per-player execution is serialized.
+ */
 class VoteRewardService(
     private val server: Server,
     private val tasks: LifecycleTaskScope,
     private val repository: VoteRepository,
     private val ledger: OneTimeUseLedger,
-    private val economy: Economy,
+    private val depositor: VoteRewardDepositor,
     private val settings: ArcVotesSettings,
     private val locale: VoteLocale,
     private val logger: Logger,
 ) : Listener {
     private val activePlayers = ConcurrentHashMap.newKeySet<UUID>()
+    private val pollInFlight = AtomicBoolean(false)
+    private val started = AtomicBoolean(false)
     private val scope = OneTimeUseScope.parse(settings.serverId)
     private val debug = StructuredDebugLine("ARCVOTES_REWARD")
+
+    fun start() {
+        check(started.compareAndSet(false, true)) { "Vote reward service is already started" }
+        val periodTicks = settings.reward.pollIntervalSeconds * TICKS_PER_SECOND
+        tasks.runTimer(periodTicks, periodTicks, ::pollOnlinePlayers)
+        pollOnlinePlayers()
+    }
 
     @EventHandler
     fun onJoin(event: PlayerJoinEvent) {
@@ -54,86 +75,163 @@ class VoteRewardService(
         }
     }
 
+    internal fun pollOnlinePlayers() {
+        if (!settings.reward.enabled || !pollInFlight.compareAndSet(false, true)) return
+        val online = server.onlinePlayers
+            .asSequence()
+            .take(MAXIMUM_ONLINE_PLAYER_BATCH)
+            .associateBy { it.name.lowercase(Locale.ROOT) }
+        if (online.isEmpty()) {
+            pollInFlight.set(false)
+            return
+        }
+        val names = online.values.mapTo(linkedSetOf()) { NetworkPlayerName.of(it.name) }
+        repository.findPendingForPlayers(names, settings.reward.maximumPendingPerPlayer)
+            .whenCompleteSync(tasks) { pending, failure ->
+                pollInFlight.set(false)
+                if (failure != null) {
+                    logger.log(Level.WARNING, "Could not poll pending vote rewards", failure)
+                    return@whenCompleteSync
+                }
+                pending.orEmpty().forEach { (normalizedName, events) ->
+                    online[normalizedName]?.let { player -> deliverLoaded(player, events) }
+                }
+            }
+    }
+
     fun deliverPending(player: Player) {
         if (!settings.reward.enabled || !activePlayers.add(player.uniqueId)) return
-        repository.findPending(ru.arc.network.NetworkPlayerName.of(player.name), MAXIMUM_PENDING_BATCH)
+        repository.findPending(NetworkPlayerName.of(player.name), settings.reward.maximumPendingPerPlayer)
             .whenCompleteSync(tasks) { events, failure ->
                 if (failure != null) {
                     logger.log(Level.WARNING, "Could not load pending vote rewards", failure)
                     finish(player.uniqueId)
                 } else {
-                    deliverNext(player, events.orEmpty(), 0)
+                    deliverNextEvent(player, events.orEmpty(), 0)
                 }
             }
     }
 
-    private fun deliverNext(player: Player, events: List<VoteEvent>, index: Int) {
-        if (index >= events.size || !player.isOnline) {
+    private fun deliverLoaded(player: Player, events: List<VoteEvent>) {
+        if (events.isEmpty() || !activePlayers.add(player.uniqueId)) return
+        deliverNextEvent(player, events, 0)
+    }
+
+    private fun deliverNextEvent(player: Player, events: List<VoteEvent>, eventIndex: Int) {
+        if (eventIndex >= events.size || !player.isOnline) {
             finish(player.uniqueId)
             return
         }
-        val event = events[index]
+        val event = events[eventIndex]
+        val components = requireNotNull(event.reward) { "Pending vote has no reward bundle" }.components
+        deliverComponent(player, event, components, componentIndex = 0, anyApplied = false, events, eventIndex)
+    }
+
+    private fun deliverComponent(
+        player: Player,
+        event: VoteEvent,
+        components: List<VoteRewardComponent>,
+        componentIndex: Int,
+        anyApplied: Boolean,
+        events: List<VoteEvent>,
+        eventIndex: Int,
+    ) {
+        if (componentIndex >= components.size) {
+            markGranted(player, event, notify = anyApplied, events, eventIndex)
+            return
+        }
+        if (!player.isOnline) {
+            deliverNextEvent(player, events, events.size)
+            return
+        }
+        val component = components[componentIndex]
+        val identity = event.oneTimeUseIdentity(component)
         val request = OneTimeUseClaimRequest(
-            identity = event.oneTimeUseIdentity(),
-            claimId = event.id,
+            identity = identity,
+            claimId = identity.useId,
             claimantId = player.uniqueId,
             scope = scope,
         )
         ledger.claim(request).whenCompleteSync(tasks) { result, failure ->
             if (failure != null) {
-                logger.log(Level.WARNING, debug.line("source" to event.vote.source.configKey, "outcome" to "claim_unknown"), failure)
-                deliverNext(player, events, index + 1)
+                logger.log(
+                    Level.WARNING,
+                    debug.line("source" to event.vote.source.configKey, "component" to component.key, "outcome" to "claim_unknown"),
+                    failure,
+                )
+                deliverNextEvent(player, events, eventIndex + 1)
                 return@whenCompleteSync
             }
             when (result) {
                 is OneTimeUseClaimResult.Acquired -> {
-                    if (result.claim.newlyCreated) applyReward(player, event, result.claim, events, index)
-                    else abandonForRecovery(player, event, result.claim, "claim_recovered", events, index)
+                    if (result.claim.newlyCreated) {
+                        applyComponent(player, event, components, componentIndex, anyApplied, result.claim, events, eventIndex)
+                    } else {
+                        abandonForRecovery(
+                            player,
+                            event,
+                            component,
+                            result.claim,
+                            "claim_recovered",
+                            events,
+                            eventIndex,
+                        )
+                    }
                 }
-                OneTimeUseClaimResult.AlreadyConsumed -> markGranted(player, event, notify = false, events, index)
-                OneTimeUseClaimResult.Busy -> deliverNext(player, events, index + 1)
+                OneTimeUseClaimResult.AlreadyConsumed ->
+                    deliverComponent(player, event, components, componentIndex + 1, anyApplied, events, eventIndex)
+                OneTimeUseClaimResult.Busy -> deliverNextEvent(player, events, eventIndex + 1)
                 OneTimeUseClaimResult.IdentityConflict,
                 OneTimeUseClaimResult.Missing,
-                -> markRecovery(player, event, "claim_conflict", events, index)
-                null -> markRecovery(player, event, "claim_missing_result", events, index)
+                -> markRecovery(player, event, component, "claim_conflict", events, eventIndex)
+                null -> markRecovery(player, event, component, "claim_missing_result", events, eventIndex)
             }
         }
     }
 
-    private fun applyReward(
+    private fun applyComponent(
         player: Player,
         event: VoteEvent,
+        components: List<VoteRewardComponent>,
+        componentIndex: Int,
+        anyApplied: Boolean,
         claim: OneTimeUseClaim,
         events: List<VoteEvent>,
-        index: Int,
+        eventIndex: Int,
     ) {
+        val component = components[componentIndex]
         if (!player.isOnline) {
-            releaseAndContinue(player, event, claim, events, index)
+            releaseAndContinue(player, event, component, claim, events, eventIndex)
             return
         }
-        val amount = requireNotNull(event.rewardAmount)
-        val response = try {
-            economy.depositPlayer(player, amount.toDouble())
+        val result = try {
+            depositor.deposit(player, component)
         } catch (failure: Throwable) {
-            logger.log(Level.SEVERE, debug.line("source" to event.vote.source.configKey, "outcome" to "effect_unknown"), failure)
-            abandonForRecovery(player, event, claim, "effect_unknown", events, index)
+            logger.log(
+                Level.SEVERE,
+                debug.line("source" to event.vote.source.configKey, "component" to component.key, "outcome" to "effect_unknown"),
+                failure,
+            )
+            abandonForRecovery(player, event, component, claim, "effect_unknown", events, eventIndex)
             return
         }
-        if (!response.transactionSuccess()) {
-            logger.warning(debug.line("source" to event.vote.source.configKey, "outcome" to "provider_rejected"))
-            releaseAndContinue(player, event, claim, events, index)
+        if (result != RewardDepositResult.APPLIED) {
+            logger.warning(
+                debug.line("source" to event.vote.source.configKey, "component" to component.key, "outcome" to "provider_rejected"),
+            )
+            releaseAndContinue(player, event, component, claim, events, eventIndex)
             return
         }
         ledger.commit(claim).whenCompleteSync(tasks) { committed, failure ->
             if (failure != null || committed !in setOf(OneTimeUseCommitResult.COMMITTED, OneTimeUseCommitResult.ALREADY_COMMITTED)) {
                 logger.log(
                     Level.SEVERE,
-                    debug.line("source" to event.vote.source.configKey, "outcome" to "commit_unknown"),
+                    debug.line("source" to event.vote.source.configKey, "component" to component.key, "outcome" to "commit_unknown"),
                     failure,
                 )
-                markRecovery(player, event, "commit_unknown", events, index)
+                abandonForRecovery(player, event, component, claim, "commit_unknown", events, eventIndex)
             } else {
-                markGranted(player, event, notify = true, events, index)
+                deliverComponent(player, event, components, componentIndex + 1, anyApplied = true, events, eventIndex)
             }
         }
     }
@@ -141,15 +239,16 @@ class VoteRewardService(
     private fun releaseAndContinue(
         player: Player,
         event: VoteEvent,
+        component: VoteRewardComponent,
         claim: OneTimeUseClaim,
         events: List<VoteEvent>,
-        index: Int,
+        eventIndex: Int,
     ) {
         ledger.release(claim).whenCompleteSync(tasks) { released, failure ->
             if (failure == null && released in setOf(OneTimeUseReleaseResult.RELEASED, OneTimeUseReleaseResult.ALREADY_RELEASED)) {
-                deliverNext(player, events, index + 1)
+                deliverNextEvent(player, events, eventIndex + 1)
             } else {
-                markRecovery(player, event, "release_unknown", events, index)
+                markRecovery(player, event, component, "release_unknown", events, eventIndex)
             }
         }
     }
@@ -157,16 +256,17 @@ class VoteRewardService(
     private fun abandonForRecovery(
         player: Player,
         event: VoteEvent,
+        component: VoteRewardComponent,
         claim: OneTimeUseClaim,
         failureCode: String,
         events: List<VoteEvent>,
-        index: Int,
+        eventIndex: Int,
     ) {
         ledger.abandon(claim).whenCompleteSync(tasks) { abandoned, failure ->
             if (failure == null && abandoned == OneTimeUseAbandonResult.ALREADY_COMMITTED) {
-                markGranted(player, event, notify = false, events, index)
+                deliverNextEvent(player, events, eventIndex + 1)
             } else {
-                markRecovery(player, event, failureCode, events, index)
+                markRecovery(player, event, component, failureCode, events, eventIndex)
             }
         }
     }
@@ -176,40 +276,61 @@ class VoteRewardService(
         event: VoteEvent,
         notify: Boolean,
         events: List<VoteEvent>,
-        index: Int,
+        eventIndex: Int,
     ) {
         repository.markGranted(event.id, player.uniqueId).whenCompleteSync(tasks) { updated, failure ->
             if (failure != null) {
                 logger.log(Level.SEVERE, debug.line("source" to event.vote.source.configKey, "outcome" to "state_unknown"), failure)
             } else if (updated == true && notify && player.isOnline) {
-                val presentation = settings.presentations.getValue(event.vote.source)
-                player.sendMessage(
-                    locale.render(
-                        "reward.granted",
-                        player,
-                        mapOf(
-                            "site" to locale.text(presentation.displayName),
-                            "amount" to locale.text(requireNotNull(event.rewardAmount).stripTrailingZeros().toPlainString()),
-                            "currency" to locale.text(settings.reward.currencyLabel),
-                        ),
-                    ),
-                )
+                runCatching { sendRewardMessage(player, event) }
+                    .onFailure { displayFailure -> logger.log(Level.WARNING, "Vote reward was granted but its message could not be shown", displayFailure) }
             }
-            deliverNext(player, events, index + 1)
+            deliverNextEvent(player, events, eventIndex + 1)
         }
+    }
+
+    private fun sendRewardMessage(player: Player, event: VoteEvent) {
+        val presentation = settings.presentations.getValue(event.vote.source)
+        val rewardComponents = requireNotNull(event.reward).components.map { component ->
+            locale.render(
+                "reward.component-${component.key}",
+                player,
+                mapOf("amount" to locale.text(component.amount.stripTrailingZeros().toPlainString())),
+            )
+        }
+        val rewards = Component.join(
+            JoinConfiguration.separator(locale.render("reward.component-separator", player)),
+            rewardComponents,
+        )
+        locale.renderLines(
+            "reward.granted",
+            player,
+            mapOf(
+                "site" to locale.text(presentation.displayName),
+                "rewards" to rewards,
+            ),
+        ).forEach(player::sendMessage)
     }
 
     private fun markRecovery(
         player: Player,
         event: VoteEvent,
+        component: VoteRewardComponent,
         failureCode: String,
         events: List<VoteEvent>,
-        index: Int,
+        eventIndex: Int,
     ) {
         repository.markRecovery(event.id, player.uniqueId, failureCode).whenCompleteSync(tasks) { _, failure ->
             if (failure != null) logger.log(Level.SEVERE, "Could not retain vote reward for recovery", failure)
-            logger.warning(debug.line("source" to event.vote.source.configKey, "outcome" to "recovery", "code" to failureCode))
-            deliverNext(player, events, index + 1)
+            logger.warning(
+                debug.line(
+                    "source" to event.vote.source.configKey,
+                    "component" to component.key,
+                    "outcome" to "recovery",
+                    "code" to failureCode,
+                ),
+            )
+            deliverNextEvent(player, events, eventIndex + 1)
         }
     }
 
@@ -218,6 +339,7 @@ class VoteRewardService(
     }
 
     private companion object {
-        const val MAXIMUM_PENDING_BATCH = 64
+        const val TICKS_PER_SECOND = 20L
+        const val MAXIMUM_ONLINE_PLAYER_BATCH = 500
     }
 }

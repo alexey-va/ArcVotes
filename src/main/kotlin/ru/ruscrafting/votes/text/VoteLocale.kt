@@ -47,12 +47,15 @@ class VoteLocale(
                     "commands.help",
                     "commands.state-enabled",
                     "commands.state-disabled",
-                    "reward.granted",
+                    "reward.component-standard",
+                    "reward.component-premium",
+                    "reward.component-separator",
                 ),
                 listPaths = setOf(
                     "commands.vote-list",
                     "commands.status",
                     "commands.counters",
+                    "reward.granted",
                 ),
             ),
         )

@@ -36,8 +36,19 @@ mysql:
 
 reward:
   enabled: false
-  amount: 100.00
+  # Legacy keys remain during rolling upgrades; ArcVotes 0.2+ reads the
+  # component-specific settings below.
+  amount: 1000.00
   currency-label: монет
+  poll-interval-seconds: 5
+  maximum-pending-per-player: 16
+  standard:
+    enabled: true
+    amount: 1000.00
+  premium:
+    enabled: true
+    currency-id: tokens
+    amount: 3.00
 
 monitorings:
   minecraft-rating:

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "0.1.0"
+version = "0.2.0"
 description = "Authenticated vote callbacks and idempotent rewards for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -78,6 +78,9 @@ tasks {
         archiveClassifier.set("")
         mergeServiceFiles()
         relocate("com.fasterxml.jackson", "ru.ruscrafting.votes.lib.jackson")
+        // ArcVotes intentionally has no metrics module or listener. arc-core-paper
+        // contains an optional collector class, so keep it out of this plugin JAR.
+        exclude("ru/arc/metrics/**")
         exclude("org/slf4j/**")
         exclude("org/bukkit/**")
         exclude("io/papermc/**")

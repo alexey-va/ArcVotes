@@ -6,7 +6,6 @@ import ru.ruscrafting.votes.config.MonitoringSource
 import ru.ruscrafting.votes.domain.VoteEvent
 import ru.ruscrafting.votes.domain.VoteRecordResult
 import ru.ruscrafting.votes.storage.VoteRepository
-import java.math.BigDecimal
 import java.sql.SQLException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
@@ -30,7 +29,7 @@ class VoteIngressService(
     private data class Route(val source: MonitoringSource, val adapter: VoteCallbackAdapter?)
 
     private val debug = StructuredDebugLine("ARCVOTES_CALLBACK")
-    private val rewardAmount: BigDecimal? = settings.reward.amount.takeIf { settings.reward.enabled }
+    private val reward = settings.reward.bundle
     private val routes: Map<String, Route> = mapOf(
         MINECRAFT_RATING_PATH to Route(
             MonitoringSource.MINECRAFT_RATING,
@@ -70,7 +69,7 @@ class VoteIngressService(
         }
         return authentication.thenCompose { result ->
             when (result) {
-                is CallbackAuthenticationResult.Accepted -> repository.record(result.vote, rewardAmount).thenApply { recorded ->
+                is CallbackAuthenticationResult.Accepted -> repository.record(result.vote, reward).thenApply { recorded ->
                     when (recorded) {
                         is VoteRecordResult.Inserted -> {
                             accepted.incrementAndGet()

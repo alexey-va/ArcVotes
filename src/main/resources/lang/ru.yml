@@ -8,7 +8,7 @@ commands:
     - '<#82c7ae>◆ <monitoring_minecraft></color> <#d9bda0>— открыть</color>'
     - '<#b29bd4>◆ <game_monitoring></color> <#d9bda0>— открыть</color>'
     - '<reset>'
-  reward-note: '<#ffd9b3>Укажите игровой ник</color> <#ff8fa3>·</color> <#fff4e3>награда придёт при входе.</color>'
+  reward-note: '<#ffd9b3>Игровой ник</color> <#ff8fa3>·</color> <#fff4e3>награда за несколько секунд.</color>'
   open-hint: '<#fff4e3>Нажмите, чтобы открыть <site></color>'
   no-permission: '<prefix> <#ff8f7a>Недостаточно прав.</color>'
   help: '<prefix> <#fff4e3>Использование:</color> <#ffcf70>/vote</color>'
@@ -29,4 +29,9 @@ commands:
     - '<#ffd9b3>Принято:</color> <accepted> <#ff8fa3>·</color> <#ffd9b3>повторов:</color> <duplicates>'
     - '<#ffd9b3>Отклонено:</color> <rejected> <#ff8fa3>·</color> <#ffd9b3>ошибок API:</color> <upstream_failures>'
 reward:
-  granted: '<prefix> <#8fe1c2><bold>Спасибо!</bold></color> <#fff4e3>Голос на <site> засчитан.</color> <#ff8fa3><bold>+<amount> <currency></bold></color>'
+  granted:
+    - '<prefix> <#fff4e3>Голос на <site> засчитан.</color>'
+    - '  <rewards>'
+  component-standard: '<#8fe1c2><bold>+<amount> монет</bold></color>'
+  component-premium: '<#e7bd72><bold>+<amount> жетона</bold></color>'
+  component-separator: ' <#d9bda0>·</color> '

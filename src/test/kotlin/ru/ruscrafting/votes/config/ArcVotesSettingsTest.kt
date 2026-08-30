@@ -18,6 +18,10 @@ class ArcVotesSettingsTest : StringSpec({
         settings.http.enabled shouldBe false
         settings.sql shouldBe null
         settings.reward.enabled shouldBe false
+        settings.reward.pollIntervalSeconds shouldBe 5L
+        settings.reward.standard.amount.compareTo(java.math.BigDecimal("1000")) shouldBe 0
+        settings.reward.premium.amount.compareTo(java.math.BigDecimal("3")) shouldBe 0
+        settings.reward.premium.currencyId shouldBe "tokens"
         settings.enabledSources shouldBe emptySet()
         VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale }).validate()
     }
