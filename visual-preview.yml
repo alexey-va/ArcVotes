@@ -1,0 +1,42 @@
+schema: 1
+plugin: ArcVotes
+minecraft-version: '1.21.11'
+minecraft-client-sha1: ba2df812c2d12e0219c489c4cd9a5e1f0760f5bd
+gallery-accent: '#ffb86b'
+
+resource-pack:
+  url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip
+  sha256-url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip.sha256
+
+sources:
+  votes:
+    path: src/main/resources/lang/ru.yml
+    prefix-key: prefix
+    exclude: [prefix]
+
+placeholders:
+  minecraft_rating: '<underlined>MinecraftRating</underlined>'
+  hotmc: '<underlined>HotMC</underlined>'
+  monitoring_minecraft: '<underlined>MonitoringMinecraft</underlined>'
+  game_monitoring: '<underlined>GameMonitoring</underlined>'
+  site: HotMC
+  amount: '100'
+  currency: монет
+  http: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
+  mysql: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
+  reward: '<#ff8f7a><bold>— ВЫКЛ</bold></color>'
+  minecraft_rating_status: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
+  hotmc_status: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
+  monitoring_minecraft_status: '<#ff8f7a><bold>— ВЫКЛ</bold></color>'
+  game_monitoring_status: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
+  accepted: '128'
+  duplicates: '7'
+  rejected: '3'
+  upstream_failures: '1'
+
+surfaces:
+  chat:
+    - source: votes
+      include:
+        - commands.*
+        - reward.*

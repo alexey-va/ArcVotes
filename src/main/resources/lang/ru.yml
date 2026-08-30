@@ -1,0 +1,30 @@
+prefix: '<#ffb86b><bold>Голоса</bold></color> <#ff8fa3>·</color>'
+commands:
+  vote-list:
+    - '<prefix> <#fff4e3>Поддержите сервер на четырёх сайтах:</color>'
+    - '<#e7bd72>◆ <minecraft_rating></color> <#d9bda0>— открыть</color>'
+    - '<#e58b7f>◆ <hotmc></color> <#d9bda0>— открыть</color>'
+    - '<#82c7ae>◆ <monitoring_minecraft></color> <#d9bda0>— открыть</color>'
+    - '<#b29bd4>◆ <game_monitoring></color> <#d9bda0>— открыть</color>'
+  reward-note: '<#ffd9b3>Укажите игровой ник</color> <#ff8fa3>·</color> <#fff4e3>награда придёт при входе.</color>'
+  open-hint: '<#fff4e3>Нажмите, чтобы открыть <site></color>'
+  no-permission: '<prefix> <#ff8f7a>Недостаточно прав.</color>'
+  help: '<prefix> <#fff4e3>Использование:</color> <#ffcf70>/vote</color>'
+  state-enabled: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
+  state-disabled: '<#ff8f7a><bold>— ВЫКЛ</bold></color>'
+  status:
+    - '<prefix> <#fff4e3><bold>Состояние сервиса</bold></color>'
+    - '  <#ffcf70>•</color> <#fff4e3>HTTP-приёмник</color> <http>'
+    - '  <#ffcf70>•</color> <#fff4e3>MySQL</color> <mysql>'
+    - '  <#ffcf70>•</color> <#fff4e3>Награды</color> <reward>'
+    - '<#ff8fa3><bold>Мониторинги</bold></color>'
+    - '  <#e7bd72>◆ MinecraftRating</color> <minecraft_rating_status>'
+    - '  <#e58b7f>◆ HotMC</color> <hotmc_status>'
+    - '  <#82c7ae>◆ MonitoringMinecraft</color> <monitoring_minecraft_status>'
+    - '  <#b29bd4>◆ GameMonitoring</color> <game_monitoring_status>'
+  counters:
+    - '<#ff8fa3><bold>Callback-события</bold></color>'
+    - '<#ffd9b3>Принято:</color> <accepted> <#ff8fa3>·</color> <#ffd9b3>повторов:</color> <duplicates>'
+    - '<#ffd9b3>Отклонено:</color> <rejected> <#ff8fa3>·</color> <#ffd9b3>ошибок API:</color> <upstream_failures>'
+reward:
+  granted: '<prefix> <#8fe1c2><bold>Спасибо!</bold></color> <#fff4e3>Голос на <site> засчитан.</color> <#ff8fa3><bold>+<amount> <currency></bold></color>'

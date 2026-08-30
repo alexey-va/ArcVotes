@@ -1,0 +1,30 @@
+prefix: '<#ffb86b><bold>Votes</bold></color> <#ff8fa3>·</color>'
+commands:
+  vote-list:
+    - '<prefix> <#fff4e3>Support the server on four voting sites:</color>'
+    - '<#e7bd72>◆ <minecraft_rating></color> <#d9bda0>— open</color>'
+    - '<#e58b7f>◆ <hotmc></color> <#d9bda0>— open</color>'
+    - '<#82c7ae>◆ <monitoring_minecraft></color> <#d9bda0>— open</color>'
+    - '<#b29bd4>◆ <game_monitoring></color> <#d9bda0>— open</color>'
+  reward-note: '<#ffd9b3>Use your in-game name</color> <#ff8fa3>·</color> <#fff4e3>the reward arrives on join.</color>'
+  open-hint: '<#fff4e3>Click to open <site></color>'
+  no-permission: '<prefix> <#ff8f7a>You do not have permission.</color>'
+  help: '<prefix> <#fff4e3>Usage:</color> <#ffcf70>/vote</color>'
+  state-enabled: '<#8fe1c2><bold>✓ ON</bold></color>'
+  state-disabled: '<#ff8f7a><bold>— OFF</bold></color>'
+  status:
+    - '<prefix> <#fff4e3><bold>Service status</bold></color>'
+    - '  <#ffcf70>•</color> <#fff4e3>HTTP ingress</color> <http>'
+    - '  <#ffcf70>•</color> <#fff4e3>MySQL</color> <mysql>'
+    - '  <#ffcf70>•</color> <#fff4e3>Rewards</color> <reward>'
+    - '<#ff8fa3><bold>Monitoring sites</bold></color>'
+    - '  <#e7bd72>◆ MinecraftRating</color> <minecraft_rating_status>'
+    - '  <#e58b7f>◆ HotMC</color> <hotmc_status>'
+    - '  <#82c7ae>◆ MonitoringMinecraft</color> <monitoring_minecraft_status>'
+    - '  <#b29bd4>◆ GameMonitoring</color> <game_monitoring_status>'
+  counters:
+    - '<#ff8fa3><bold>Callback events</bold></color>'
+    - '<#ffd9b3>Accepted:</color> <accepted> <#ff8fa3>·</color> <#ffd9b3>duplicates:</color> <duplicates>'
+    - '<#ffd9b3>Rejected:</color> <rejected> <#ff8fa3>·</color> <#ffd9b3>API failures:</color> <upstream_failures>'
+reward:
+  granted: '<prefix> <#8fe1c2><bold>Thank you!</bold></color> <#fff4e3>Your <site> vote was recorded.</color> <#ff8fa3><bold>+<amount> <currency></bold></color>'

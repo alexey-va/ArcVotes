@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Render ArcVotes player-facing chat surfaces with the canonical ops renderer."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def ops_candidates(explicit: Path | None) -> list[Path]:
+    candidates: list[Path] = []
+    if explicit is not None:
+        candidates.append(explicit)
+    configured = os.environ.get("RUSCRAFTING_OPS_ROOT")
+    if configured:
+        candidates.append(Path(configured))
+    candidates.extend(
+        (
+            PROJECT_ROOT.parent / ".deploy-ruscrafting-ops",
+            PROJECT_ROOT.parent / "ruscrafting-ops",
+            PROJECT_ROOT.parent / "mcserver",
+            Path.home() / "mcserver",
+        ),
+    )
+    return candidates
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ops-root", type=Path)
+    parser.add_argument("--client-jar", type=Path)
+    parser.add_argument("--resource-pack", type=Path)
+    parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "build/reports/visual-preview")
+    parser.add_argument("--gui-scale", type=int, default=3)
+    args = parser.parse_args()
+
+    relative_tool = Path(".agents/skills/design-ruscrafting-surfaces/scripts/render_plugin_surface_dump.py")
+    ops_root = next(
+        (candidate.resolve() for candidate in ops_candidates(args.ops_root) if (candidate / relative_tool).is_file()),
+        None,
+    )
+    if ops_root is None:
+        parser.error("RusCrafting ops checkout was not found; pass --ops-root or RUSCRAFTING_OPS_ROOT")
+
+    command = [
+        sys.executable,
+        "-B",
+        str(ops_root / relative_tool),
+        "--manifest",
+        str(PROJECT_ROOT / "visual-preview.yml"),
+        "--project-root",
+        str(PROJECT_ROOT),
+        "--output",
+        str(args.output),
+        "--gui-scale",
+        str(args.gui_scale),
+    ]
+    if args.client_jar is not None:
+        command.extend(("--client-jar", str(args.client_jar)))
+    if args.resource_pack is not None:
+        command.extend(("--resource-pack", str(args.resource_pack)))
+    return subprocess.run(command, check=False).returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,93 @@
+# ArcVotes starts in link-only mode. Enable MySQL and the callback listener only
+# after the reverse-proxy route and secret environment variables are ready.
+server-id: survival
+
+locale:
+  default: ru
+  use-client-locale: false
+
+http:
+  enabled: false
+  # Feature ingress is intentionally loopback-only. TLS and public routing belong
+  # to the managed reverse proxy.
+  bind-address: 127.0.0.1
+  port: 9187
+  worker-threads: 2
+  queue-capacity: 64
+  maximum-body-bytes: 16384
+  persistence-timeout-ms: 10000
+  trust-single-forwarded-client-ip: true
+
+mysql:
+  enabled: false
+  host: mysql
+  port: 3306
+  database: minecraft
+  username: minecraft
+  password-env: ARC_VOTES_MYSQL_PASSWORD
+  ssl-mode: DISABLED
+  minimum-idle: 1
+  maximum-pool-size: 4
+  connection-timeout-ms: 10000
+  socket-timeout-ms: 30000
+  validation-timeout-ms: 5000
+  max-lifetime-ms: 1700000
+  fail-fast: true
+
+reward:
+  enabled: false
+  amount: 100.00
+  currency-label: монет
+
+monitorings:
+  minecraft-rating:
+    enabled: false
+    display-name: MinecraftRating
+    vote-url: https://minecraftrating.ru/projects/rus-crafting/
+    secret-env: ARC_VOTES_MINECRAFT_RATING_SECRET
+    maximum-age-seconds: 691200
+    maximum-future-skew-seconds: 300
+    enforce-ip-allowlist: false
+    allowed-ips: []
+
+  hotmc:
+    enabled: false
+    display-name: HotMC
+    vote-url: https://hotmc.ru/minecraft-server-242482
+    secret-env: ARC_VOTES_HOTMC_SECRET
+    maximum-age-seconds: 691200
+    maximum-future-skew-seconds: 300
+    enforce-ip-allowlist: true
+    # Current sender addresses published in the HotMC owner panel.
+    allowed-ips:
+      - 176.108.255.82
+      - 109.207.174.67
+      - 31.44.5.3
+
+  monitoring-minecraft:
+    enabled: false
+    # Keep false until a test callback from the current owner panel confirms the
+    # exact field names and auth placement. The route exists but fails closed.
+    protocol-confirmed: false
+    display-name: MonitoringMinecraft
+    vote-url: https://monitoringminecraft.com/
+    secret-env: ARC_VOTES_MONITORING_MINECRAFT_SECRET
+    body-format: FORM
+    nickname-field: nickname
+    event-id-field: event_id
+    authentication-mode: HEADER
+    authentication-name: X-Api-Key
+    enforce-ip-allowlist: false
+    allowed-ips: []
+
+  game-monitoring:
+    enabled: false
+    display-name: GameMonitoring
+    vote-url: https://gamemonitoring.ru/minecraft/servers/7880540
+    webhook-token-env: ARC_VOTES_GAME_MONITORING_WEBHOOK_TOKEN
+    expected-entity-type: server
+    # API entity id from the GameMonitoring owner/API contract. It is not the
+    # same number as the public /minecraft/servers/7880540 page id.
+    expected-entity-id: '14210383'
+    enforce-ip-allowlist: false
+    allowed-ips: []

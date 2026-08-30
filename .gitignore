@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+.kotlin/
+build/
+out/
+*.iml
+.env
+*.env
+runtime/
+visual-preview/

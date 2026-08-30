@@ -1,0 +1,39 @@
+package ru.ruscrafting.votes.storage
+
+import ru.arc.sql.SqlMigration
+import ru.arc.sql.onetime.MySqlOneTimeUseLedger
+
+object VoteMigrations {
+    val EVENTS = SqlMigration(
+        version = 1,
+        description = "create durable vote events",
+        statements = listOf(
+            """
+            CREATE TABLE IF NOT EXISTS `arc_votes_events` (
+                `event_uuid` BINARY(16) NOT NULL,
+                `source` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                `external_id` VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                `player_name` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                `player_name_normalized` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                `occurred_at` TIMESTAMP(3) NOT NULL,
+                `received_at` TIMESTAMP(3) NOT NULL,
+                `reward_amount` DECIMAL(20,2) NULL,
+                `reward_state` VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                `player_uuid` BINARY(16) NULL,
+                `rewarded_at` TIMESTAMP(3) NULL,
+                `failure_code` VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+                PRIMARY KEY (`event_uuid`),
+                UNIQUE KEY `arc_votes_source_external_uq` (`source`, `external_id`),
+                KEY `arc_votes_player_pending_idx` (`player_name_normalized`, `reward_state`, `received_at`),
+                CONSTRAINT `arc_votes_reward_state_chk`
+                    CHECK (`reward_state` IN ('NONE', 'PENDING', 'GRANTED', 'RECOVERY'))
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """.trimIndent(),
+        ),
+    )
+
+    val ALL = listOf(
+        EVENTS,
+        MySqlOneTimeUseLedger.createTableMigration(version = 2),
+    )
+}

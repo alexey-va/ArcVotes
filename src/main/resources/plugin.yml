@@ -1,0 +1,18 @@
+name: ArcVotes
+version: '${version}'
+main: ru.ruscrafting.votes.paper.ArcVotesPlugin
+api-version: '1.21.11'
+authors: [RusCrafting]
+description: Authenticated vote callbacks and idempotent rewards
+softdepend: [Vault]
+commands:
+  vote:
+    description: Open server voting links
+    aliases: [votes, golos]
+    usage: /vote [status]
+    permission: arcvotes.use
+permissions:
+  arcvotes.use:
+    default: true
+  arcvotes.admin.status:
+    default: op
