@@ -7,6 +7,7 @@ import io.mockk.every
 import io.mockk.mockk
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
 import ru.arc.config.ConfigManager
@@ -29,7 +30,10 @@ class VoteCommandTest : StringSpec({
         val vote = VoteCommand(settings, locale, null)
         vote.onCommand(sender, command, "vote", emptyArray()) shouldBe true
 
-        messages shouldHaveSize 5
+        messages shouldHaveSize 7
+        val plain = PlainTextComponentSerializer.plainText()
+        plain.serialize(messages.first()) shouldBe ""
+        plain.serialize(messages.last()) shouldBe ""
         val links = messages
             .flatMap(Component::descendantsAndSelf)
             .mapNotNull(Component::clickEvent)

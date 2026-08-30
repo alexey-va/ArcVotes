@@ -1,11 +1,13 @@
 prefix: '<#ffb86b><bold>Votes</bold></color> <#ff8fa3>·</color>'
 commands:
   vote-list:
+    - '<reset>'
     - '<prefix> <#fff4e3>Support the server on four voting sites:</color>'
     - '<#e7bd72>◆ <minecraft_rating></color> <#d9bda0>— open</color>'
     - '<#e58b7f>◆ <hotmc></color> <#d9bda0>— open</color>'
     - '<#82c7ae>◆ <monitoring_minecraft></color> <#d9bda0>— open</color>'
     - '<#b29bd4>◆ <game_monitoring></color> <#d9bda0>— open</color>'
+    - '<reset>'
   reward-note: '<#ffd9b3>Use your in-game name</color> <#ff8fa3>·</color> <#fff4e3>the reward arrives on join.</color>'
   open-hint: '<#fff4e3>Click to open <site></color>'
   no-permission: '<prefix> <#ff8f7a>You do not have permission.</color>'
