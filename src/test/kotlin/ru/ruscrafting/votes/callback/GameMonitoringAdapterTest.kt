@@ -29,6 +29,7 @@ class GameMonitoringAdapterTest : StringSpec({
     )
 
     "signed vote webhook is resolved through the authoritative API result" {
+        val eventId = "9824cabb-2203-437e-9b6c-aba43dde3e4b"
         val calls = AtomicInteger()
         val adapter = GameMonitoringAdapter(settings) { eventId ->
             calls.incrementAndGet()
@@ -42,15 +43,15 @@ class GameMonitoringAdapterTest : StringSpec({
                 ),
             )
         }
-        val canonical = "event_id=42&event_type=server.vote&is_test=false"
-        val body = """{"event_type":"server.vote","event_id":42,"is_test":false,"signature":"${hmac(tokenText, canonical)}"}"""
+        val canonical = "event_id=$eventId&event_type=server.vote&is_test=false"
+        val body = """{"event_type":"server.vote","event_id":"$eventId","is_test":false,"signature":"${hmac(tokenText, canonical)}"}"""
 
         val result = adapter.authenticate(jsonRequest(body)).join()
             .shouldBeInstanceOf<CallbackAuthenticationResult.Accepted>()
 
         calls.get() shouldBe 1
         result.vote.playerName.value shouldBe "Steve"
-        result.vote.externalId shouldBe "server.vote:42"
+        result.vote.externalId shouldBe "server.vote:$eventId"
     }
 
     "signed test webhook acknowledges without creating a vote or API lookup" {

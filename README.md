@@ -8,7 +8,7 @@ Supported callback routes:
 | --- | --- | --- |
 | MinecraftRating | `POST /callbacks/minecraft-rating` | form fields `username`, `timestamp`, `signature` |
 | HotMC | `POST /callbacks/hotmc` | multipart fields `nick`, `time`, `sign` |
-| MonitoringMinecraft | `POST /callbacks/monitoring-minecraft` | configurable authenticated form/JSON adapter; disabled until the panel contract is confirmed |
+| MonitoringMinecraft | `POST /callbacks/monitoring-minecraft` | bearer-authenticated JSON with `nickname`, `server_id`, `timestamp`, and optional `test` |
 | GameMonitoring | `POST /callbacks/gamemonitoring` | signed JSON webhook followed by an authoritative vote API lookup |
 
 The HTTP listener binds to loopback by default and is disabled in the bundled configuration. Put it behind the managed TLS reverse proxy, configure one unguessable public callback URL per route, then enable only the adapters whose secrets and expected entity identifiers are present.

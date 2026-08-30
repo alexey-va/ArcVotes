@@ -66,28 +66,22 @@ monitorings:
 
   monitoring-minecraft:
     enabled: false
-    # Keep false until a test callback from the current owner panel confirms the
-    # exact field names and auth placement. The route exists but fails closed.
-    protocol-confirmed: false
     display-name: MonitoringMinecraft
-    vote-url: https://monitoringminecraft.com/
+    vote-url: https://monitoringminecraft.com/server/43/
     secret-env: ARC_VOTES_MONITORING_MINECRAFT_SECRET
-    body-format: FORM
-    nickname-field: nickname
-    event-id-field: event_id
-    authentication-mode: HEADER
-    authentication-name: X-Api-Key
+    expected-server-id: '43'
+    maximum-age-seconds: 691200
+    maximum-future-skew-seconds: 300
     enforce-ip-allowlist: false
     allowed-ips: []
 
   game-monitoring:
     enabled: false
     display-name: GameMonitoring
-    vote-url: https://gamemonitoring.ru/minecraft/servers/7880540
+    vote-url: https://gamemonitoring.ru/minecraft/servers/14210383/vote
     webhook-token-env: ARC_VOTES_GAME_MONITORING_WEBHOOK_TOKEN
     expected-entity-type: server
-    # API entity id from the GameMonitoring owner/API contract. It is not the
-    # same number as the public /minecraft/servers/7880540 page id.
+    # Current server/API entity id from the owner page.
     expected-entity-id: '14210383'
     enforce-ip-allowlist: false
     allowed-ips: []

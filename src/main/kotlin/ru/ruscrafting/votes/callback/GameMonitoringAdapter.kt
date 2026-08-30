@@ -61,7 +61,7 @@ class GameMonitoringAdapter(
         if (eventType !in setOf("server.vote", "project.vote")) {
             return completed(CallbackAuthenticationResult.Ignored)
         }
-        if (!eventId.matches(Regex("[0-9]{1,20}"))) throw CallbackRejected(400, "invalid_event_id")
+        if (!eventId.matches(GAME_MONITORING_EVENT_ID)) throw CallbackRejected(400, "invalid_event_id")
         return lookup.lookup(eventId).thenApply { authoritative ->
             if (authoritative.eventId != eventId ||
                 authoritative.entityType != settings.expectedEntityType ||
@@ -88,7 +88,7 @@ class HttpGameMonitoringVoteLookup(
         .build(),
 ) : GameMonitoringVoteLookup {
     override fun lookup(eventId: String): CompletableFuture<AuthoritativeGameMonitoringVote> {
-        if (!eventId.matches(Regex("[0-9]{1,20}"))) {
+        if (!eventId.matches(GAME_MONITORING_EVENT_ID)) {
             return CompletableFuture.failedFuture(CallbackRejected(400, "invalid_event_id"))
         }
         val request = HttpRequest.newBuilder(URI.create("https://api.gamemonitoring.ru/votes/$eventId"))
@@ -112,7 +112,9 @@ class HttpGameMonitoringVoteLookup(
                     ?: throw CallbackUpstreamFailure("missing_upstream_entity")
                 val entityId = payload["entity_id"]?.canonicalIdentifier()
                     ?: throw CallbackUpstreamFailure("missing_upstream_entity")
-                val responseEventId = payload["event_id"]?.canonicalIdentifier() ?: eventId
+                val responseEventId = payload["id"]?.canonicalIdentifier()
+                    ?: payload["event_id"]?.canonicalIdentifier()
+                    ?: eventId
                 AuthoritativeGameMonitoringVote(
                     eventId = responseEventId,
                     playerName = playerName,
@@ -128,6 +130,8 @@ class HttpGameMonitoringVoteLookup(
         const val MAXIMUM_RESPONSE_BYTES = 32 * 1_024
     }
 }
+
+private val GAME_MONITORING_EVENT_ID = Regex("[A-Za-z0-9-]{1,100}")
 
 private fun JsonNode.canonicalScalar(): String = when {
     isTextual -> textValue()

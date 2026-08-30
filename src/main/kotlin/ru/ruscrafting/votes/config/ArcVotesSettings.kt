@@ -18,9 +18,6 @@ enum class MonitoringSource(val configKey: String) {
     GAME_MONITORING("game-monitoring"),
 }
 
-enum class MonitoringMinecraftBodyFormat { FORM, JSON }
-enum class MonitoringMinecraftAuthenticationMode { HEADER, FIELD }
-
 data class HttpSettings(
     val enabled: Boolean,
     val bindAddress: InetAddress,
@@ -98,28 +95,18 @@ data class SignedFormSourceSettings(
 
 data class MonitoringMinecraftSettings(
     val enabled: Boolean,
-    val protocolConfirmed: Boolean,
     val presentation: SourcePresentation,
     val secret: SecretValue?,
-    val bodyFormat: MonitoringMinecraftBodyFormat,
-    val nicknameField: String,
-    val eventIdField: String,
-    val authenticationMode: MonitoringMinecraftAuthenticationMode,
-    val authenticationName: String,
+    val expectedServerId: String,
+    val maximumAgeSeconds: Long,
+    val maximumFutureSkewSeconds: Long,
     val network: NetworkSourcePolicy,
 ) {
     init {
-        require(!enabled || protocolConfirmed) {
-            "MonitoringMinecraft cannot be enabled until protocol-confirmed is true"
-        }
         require(!enabled || secret != null) { "Enabled MonitoringMinecraft adapter requires a secret" }
-        listOf(nicknameField, eventIdField).forEach {
-            require(it.matches(SAFE_FIELD_NAME)) { "MonitoringMinecraft field names must be safe ASCII identifiers" }
-        }
-        require(authenticationName.matches(SAFE_AUTH_NAME)) { "MonitoringMinecraft authentication name is unsafe" }
-        require(authenticationName !in setOf(nicknameField, eventIdField) || authenticationMode == MonitoringMinecraftAuthenticationMode.HEADER) {
-            "MonitoringMinecraft auth field must differ from vote fields"
-        }
+        require(expectedServerId.matches(Regex("[0-9]{1,20}"))) { "MonitoringMinecraft server id must be numeric" }
+        require(maximumAgeSeconds in 300..1_209_600) { "MonitoringMinecraft maximum age must be between 5 minutes and 14 days" }
+        require(maximumFutureSkewSeconds in 0..3_600) { "MonitoringMinecraft future skew must be between 0 and 3600 seconds" }
     }
 }
 
@@ -244,18 +231,11 @@ data class ArcVotesSettings(
             val enabled = config.boolean("$prefix.enabled")
             return MonitoringMinecraftSettings(
                 enabled = enabled,
-                protocolConfirmed = config.boolean("$prefix.protocol-confirmed"),
                 presentation = presentation(config, prefix),
                 secret = if (enabled) secrets.require(environmentName(config.string("$prefix.secret-env"))) else null,
-                bodyFormat = MonitoringMinecraftBodyFormat.valueOf(
-                    config.string("$prefix.body-format").trim().uppercase(Locale.ROOT),
-                ),
-                nicknameField = config.string("$prefix.nickname-field").trim(),
-                eventIdField = config.string("$prefix.event-id-field").trim(),
-                authenticationMode = MonitoringMinecraftAuthenticationMode.valueOf(
-                    config.string("$prefix.authentication-mode").trim().uppercase(Locale.ROOT),
-                ),
-                authenticationName = config.string("$prefix.authentication-name").trim(),
+                expectedServerId = config.string("$prefix.expected-server-id").trim(),
+                maximumAgeSeconds = config.long("$prefix.maximum-age-seconds"),
+                maximumFutureSkewSeconds = config.long("$prefix.maximum-future-skew-seconds"),
                 network = networkPolicy(config, prefix),
             )
         }
@@ -295,8 +275,6 @@ data class ArcVotesSettings(
     }
 }
 
-private val SAFE_FIELD_NAME = Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}")
-private val SAFE_AUTH_NAME = Regex("[A-Za-z][A-Za-z0-9-]{0,63}")
 private val IPV4 = Regex("(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}")
 private val IPV6 = Regex("[0-9A-Fa-f:]{2,45}")
 
