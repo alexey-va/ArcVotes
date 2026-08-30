@@ -25,7 +25,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
-      - uses: alexey-va/arc-core/.github/actions/verify-consumer@60a61839614bd40b93203510ee2b1631760b1bdc
+      - uses: alexey-va/arc-core/.github/actions/verify-consumer@148a4c34f02283bc8f0ac8034e72509aac0b58a8
       - run: ./gradlew --no-daemon clean test shadowJar
 
   integration:
