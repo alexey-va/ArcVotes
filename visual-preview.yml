@@ -8,6 +8,16 @@ resource-pack:
   url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip
   sha256-url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip.sha256
 
+glyphs:
+  - character: '💰'
+    path: '@pack/assets/arc/textures/glyphs/coin.png'
+    height: 9
+    ascent: 8
+  - character: ''
+    path: '@pack/assets/arc/textures/glyphs/premium_token.png'
+    height: 9
+    ascent: 8
+
 sources:
   votes:
     path: src/main/resources/lang/ru.yml
@@ -15,17 +25,18 @@ sources:
     exclude: [prefix, commands.vote-state-voted, commands.vote-state-open, reward.component-standard, reward.component-premium, reward.component-separator]
 
 placeholders:
-  minecraft_rating: '<underlined>MinecraftRating</underlined>'
+  name: MonitoringMinecraft
+  minecraft_rating: '<#ffc857><underlined>MinecraftRating</underlined></color>'
   minecraft_rating_state: '<#8fe1c2><bold>✔</bold></color>'
-  hotmc: '<underlined>HotMC</underlined>'
-  hotmc_state: '<#d9bda0>◇</color>'
-  monitoring_minecraft: '<underlined>MonitoringMinecraft</underlined>'
+  hotmc: '<#ff5f56><underlined>HotMC</underlined></color>'
+  hotmc_state: '<#ffc98c>◇</color>'
+  monitoring_minecraft: '<#43d995><underlined>MonitoringMinecraft</underlined></color>'
   monitoring_minecraft_state: '<#8fe1c2><bold>✔</bold></color>'
-  game_monitoring: '<underlined>GameMonitoring</underlined>'
-  game_monitoring_state: '<#d9bda0>◇</color>'
-  site: HotMC
+  game_monitoring: '<#b784ff><underlined>GameMonitoring</underlined></color>'
+  game_monitoring_state: '<#ffc98c>◇</color>'
+  site: '<#ff5f56>HotMC</color>'
   amount: '1000'
-  rewards: '<#8fe1c2><bold>+1000 монет</bold></color> <#d9bda0>·</color> <#e7bd72><bold>+3 жетона</bold></color>'
+  rewards: '<#4de3a2>+1000</color> <white>💰</white> <#ffc98c>·</color> <#ffd166>+3</color> <white></white>'
   http: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
   mysql: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
   reward: '<#ff8f7a><bold>— ВЫКЛ</bold></color>'
@@ -39,6 +50,10 @@ placeholders:
   upstream_failures: '1'
 
 surfaces:
+  fragments:
+    - source: votes
+      include: [sites.*]
+
   chat:
     - source: votes
       include:

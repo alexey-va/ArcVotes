@@ -5,6 +5,8 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Server
 import org.bukkit.entity.Player
 import ru.arc.core.LifecycleTaskScope
@@ -109,6 +111,31 @@ class VoteRewardServiceTest : FreeSpec({
         ledger.committed.size shouldBe 1
         repository.granted shouldContainExactly listOf(event.id)
     }
+
+    "granted reward keeps the monitoring brand color in the player message" {
+        val scheduler = TestTaskScheduler()
+        val player = player("Steve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val event = voteEvent(source = MonitoringSource.HOTMC)
+        val repository = RecordingRepository(pending = listOf(event), markGrantedResult = true)
+        val messages = mutableListOf<Component>()
+        every { player.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        val root = java.nio.file.Files.createTempDirectory("arcvotes-reward-message")
+        val fileSettings = ArcVotesSettings.load(root) { null }
+        val locale = VoteLocale(root, { fileSettings.defaultLocale }, { fileSettings.useClientLocale })
+        val service = service(server, scheduler, repository, RecordingLedger(), VoteRewardDepositor { _, _ ->
+            RewardDepositResult.APPLIED
+        }, locale)
+
+        service.deliverPending(player)
+        repeat(16) { scheduler.executeImmediate() }
+
+        val plain = PlainTextComponentSerializer.plainText()
+        messages.flatMap(Component::descendantsAndSelf).any { component ->
+            component.color()?.value() == 0xFF5F56 && plain.serialize(component).contains("HotMC")
+        } shouldBe true
+    }
 })
 
 private fun service(
@@ -117,11 +144,13 @@ private fun service(
     repository: RecordingRepository,
     ledger: RecordingLedger,
     depositor: VoteRewardDepositor,
+    locale: VoteLocale = mockk(relaxed = true),
 ): VoteRewardService {
     val settings = mockk<ArcVotesSettings>()
     every { settings.serverId } returns "spawn"
     every { settings.reward } returns rewardSettings()
-    val locale = mockk<VoteLocale>(relaxed = true)
+    val root = java.nio.file.Files.createTempDirectory("arcvotes-reward-settings")
+    every { settings.presentations } returns ArcVotesSettings.load(root) { null }.presentations
     return VoteRewardService(
         server = server,
         tasks = LifecycleTaskScope(scheduler),
@@ -148,7 +177,10 @@ private fun player(name: String): Player = mockk<Player>().also { player ->
     every { player.isOnline } returns true
 }
 
-private fun voteEvent(playerName: String = "Steve"): VoteEvent {
+private fun voteEvent(
+    playerName: String = "Steve",
+    source: MonitoringSource = MonitoringSource.MINECRAFT_RATING,
+): VoteEvent {
     val reward = VoteRewardBundle(
         listOf(
             VoteRewardComponent("standard", RewardProvider.VAULT, BigDecimal("1000.00")),
@@ -158,7 +190,7 @@ private fun voteEvent(playerName: String = "Steve"): VoteEvent {
     return VoteEvent(
         id = UUID.randomUUID(),
         vote = AuthenticatedVote(
-            MonitoringSource.MINECRAFT_RATING,
+            source,
             "vote:test",
             NetworkPlayerName.of(playerName),
             Instant.EPOCH,
@@ -171,6 +203,7 @@ private fun voteEvent(playerName: String = "Steve"): VoteEvent {
 
 private class RecordingRepository(
     private val pending: List<VoteEvent> = emptyList(),
+    private val markGrantedResult: Boolean = false,
 ) : VoteRepository {
     val polledNames = mutableListOf<Set<NetworkPlayerName>>()
     val granted = mutableListOf<UUID>()
@@ -201,12 +234,15 @@ private class RecordingRepository(
 
     override fun markGranted(eventId: UUID, playerId: UUID): CompletableFuture<Boolean> {
         granted += eventId
-        return CompletableFuture.completedFuture(false)
+        return CompletableFuture.completedFuture(markGrantedResult)
     }
 
     override fun markRecovery(eventId: UUID, playerId: UUID?, failureCode: String): CompletableFuture<Boolean> =
         CompletableFuture.completedFuture(true)
 }
+
+private fun Component.descendantsAndSelf(): List<Component> =
+    listOf(this) + children().flatMap(Component::descendantsAndSelf)
 
 private class RecordingLedger(
     private val alreadyConsumed: Set<UUID> = emptySet(),

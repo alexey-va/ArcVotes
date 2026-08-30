@@ -309,7 +309,7 @@ class VoteRewardService(
             "reward.granted",
             player,
             mapOf(
-                "site" to locale.text(presentation.displayName),
+                "site" to locale.site(event.vote.source, player, presentation.displayName),
                 "rewards" to rewards,
             ),
         ).forEach(player::sendMessage)

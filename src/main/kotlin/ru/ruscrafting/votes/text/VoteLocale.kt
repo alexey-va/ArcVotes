@@ -7,6 +7,7 @@ import ru.arc.config.ConfigManager
 import ru.arc.text.ConfigLocaleCatalog
 import ru.arc.text.LocaleRequirements
 import ru.arc.text.LocalizedMiniMessage
+import ru.ruscrafting.votes.config.MonitoringSource
 import java.nio.file.Path
 
 class VoteLocale(
@@ -36,11 +37,21 @@ class VoteLocale(
 
     fun text(value: Any?): Component = renderer.literal(value)
 
+    fun site(source: MonitoringSource, audience: CommandSender?, displayName: String): Component = render(
+        "sites.${source.configKey}",
+        audience,
+        mapOf("name" to text(displayName)),
+    )
+
     fun validate() {
         renderer.validate(
             LocaleRequirements(
                 scalarPaths = setOf(
                     "prefix",
+                    "sites.minecraft-rating",
+                    "sites.hotmc",
+                    "sites.monitoring-minecraft",
+                    "sites.game-monitoring",
                     "commands.open-hint",
                     "commands.reward-note",
                     "commands.vote-state-voted",

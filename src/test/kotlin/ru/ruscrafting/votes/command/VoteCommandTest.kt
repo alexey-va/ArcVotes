@@ -46,12 +46,20 @@ class VoteCommandTest : StringSpec({
         val plain = PlainTextComponentSerializer.plainText()
         plain.serialize(messages.first()) shouldBe ""
         plain.serialize(messages.last()) shouldBe ""
-        val links = messages
+        val linkComponents = messages
             .flatMap(Component::descendantsAndSelf)
+            .filter { it.clickEvent()?.action() == ClickEvent.Action.OPEN_URL }
+        val links = linkComponents
             .mapNotNull(Component::clickEvent)
             .filter { it.action() == ClickEvent.Action.OPEN_URL }
             .toSet()
         links shouldBe settings.presentations.values.map { ClickEvent.openUrl(it.voteUrl.toASCIIString()) }.toSet()
+        linkComponents.associate { it.clickEvent()!! to it.color()?.value() } shouldBe mapOf(
+            ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.MINECRAFT_RATING).voteUrl.toASCIIString()) to 0xFFC857,
+            ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.HOTMC).voteUrl.toASCIIString()) to 0xFF5F56,
+            ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.MONITORING_MINECRAFT).voteUrl.toASCIIString()) to 0x43D995,
+            ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.GAME_MONITORING).voteUrl.toASCIIString()) to 0xB784FF,
+        )
 
         messages.clear()
         every { sender.hasPermission("arcvotes.admin.status") } returns true

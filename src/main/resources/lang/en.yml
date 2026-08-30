@@ -1,16 +1,23 @@
 prefix: '<#ffb86b><bold>Votes</bold></color> <#ff8fa3>·</color>'
+sites:
+  minecraft-rating: '<#ffc857><name></color>'
+  hotmc: '<#ff5f56><name></color>'
+  monitoring-minecraft: '<#43d995><name></color>'
+  game-monitoring: '<#b784ff><name></color>'
 commands:
   vote-list:
     - '<reset>'
     - '<prefix> <#fff4e3>Support the server on four voting sites:</color>'
-    - '<minecraft_rating_state> <#e7bd72><minecraft_rating></color> <#d9bda0>— open</color>'
-    - '<hotmc_state> <#e58b7f><hotmc></color> <#d9bda0>— open</color>'
-    - '<monitoring_minecraft_state> <#82c7ae><monitoring_minecraft></color> <#d9bda0>— open</color>'
-    - '<game_monitoring_state> <#b29bd4><game_monitoring></color> <#d9bda0>— open</color>'
+    - '<minecraft_rating_state> <minecraft_rating> <#ffe0bd>— open</color>'
+    - '<hotmc_state> <hotmc> <#ffe0bd>— open</color>'
+    - '<monitoring_minecraft_state> <monitoring_minecraft> <#ffe0bd>— open</color>'
+    - '<game_monitoring_state> <game_monitoring> <#ffe0bd>— open</color>'
     - '<reset>'
-  reward-note: '<#ffd9b3>In-game name</color> <#ff8fa3>·</color> <#fff4e3>reward in a few seconds.</color>'
-  vote-state-voted: '<#8fe1c2><bold>✔</bold></color>'
-  vote-state-open: '<#d9bda0>◇</color>'
+  reward-note: |-
+    <#ffd9b3>Enter your in-game name on the site.</color>
+      <#fff4e3>The reward will arrive automatically.</color>
+  vote-state-voted: '<#4de3a2><bold>✔</bold></color>'
+  vote-state-open: '<#ffc98c>◇</color>'
   open-hint: '<#fff4e3>Click to open <site></color>'
   no-permission: '<prefix> <#ff8f7a>You do not have permission.</color>'
   help: '<prefix> <#fff4e3>Usage:</color> <#ffcf70>/vote</color>'
@@ -22,10 +29,10 @@ commands:
     - '  <#ffcf70>•</color> <#fff4e3>MySQL</color> <mysql>'
     - '  <#ffcf70>•</color> <#fff4e3>Rewards</color> <reward>'
     - '<#ff8fa3><bold>Monitoring sites</bold></color>'
-    - '  <#e7bd72>◆ MinecraftRating</color> <minecraft_rating_status>'
-    - '  <#e58b7f>◆ HotMC</color> <hotmc_status>'
-    - '  <#82c7ae>◆ MonitoringMinecraft</color> <monitoring_minecraft_status>'
-    - '  <#b29bd4>◆ GameMonitoring</color> <game_monitoring_status>'
+    - '  <#ffc857>◆ MinecraftRating</color> <minecraft_rating_status>'
+    - '  <#ff5f56>◆ HotMC</color> <hotmc_status>'
+    - '  <#43d995>◆ MonitoringMinecraft</color> <monitoring_minecraft_status>'
+    - '  <#b784ff>◆ GameMonitoring</color> <game_monitoring_status>'
   counters:
     - '<#ff8fa3><bold>Callback events</bold></color>'
     - '<#ffd9b3>Accepted:</color> <accepted> <#ff8fa3>·</color> <#ffd9b3>duplicates:</color> <duplicates>'
@@ -34,6 +41,6 @@ reward:
   granted:
     - '<prefix> <#fff4e3>Your <site> vote was recorded.</color>'
     - '  <rewards>'
-  component-standard: '<#8fe1c2><bold>+<amount> coins</bold></color>'
-  component-premium: '<#e7bd72><bold>+<amount> tokens</bold></color>'
-  component-separator: ' <#d9bda0>·</color> '
+  component-standard: '<#4de3a2>+<amount></color> <white>💰</white>'
+  component-premium: '<#ffd166>+<amount></color> <white></white>'
+  component-separator: ' <#ffc98c>·</color> '

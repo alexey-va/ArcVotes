@@ -80,13 +80,12 @@ class VoteCommand(
     ) listOf("status") else emptyList()
 
     private fun link(source: MonitoringSource, sender: CommandSender, label: String, url: String): Component =
-        Component.text(label)
-        .color(sourceColor(source))
+        locale.site(source, sender, label)
         .decorate(TextDecoration.UNDERLINED)
         .clickEvent(ClickEvent.openUrl(url))
         .hoverEvent(
             HoverEvent.showText(
-                locale.render("commands.open-hint", sender, mapOf("site" to locale.text(label))),
+                locale.render("commands.open-hint", sender, mapOf("site" to locale.site(source, sender, label))),
             ),
         )
 
@@ -129,13 +128,6 @@ class VoteCommand(
         if (voted) "commands.vote-state-voted" else "commands.vote-state-open",
         sender,
     )
-
-    private fun sourceColor(source: MonitoringSource): TextColor = when (source) {
-        MonitoringSource.MINECRAFT_RATING -> TextColor.color(0xE7BD72)
-        MonitoringSource.HOTMC -> TextColor.color(0xE58B7F)
-        MonitoringSource.MONITORING_MINECRAFT -> TextColor.color(0x82C7AE)
-        MonitoringSource.GAME_MONITORING -> TextColor.color(0xB29BD4)
-    }
 
     private fun state(sender: CommandSender, enabled: Boolean): Component = locale.render(
         if (enabled) "commands.state-enabled" else "commands.state-disabled",
