@@ -26,6 +26,7 @@ import ru.ruscrafting.votes.domain.RewardProvider
 import ru.ruscrafting.votes.reward.VoteRewardService
 import ru.ruscrafting.votes.reward.VaultRedisEconomyRewardDepositor
 import ru.ruscrafting.votes.storage.MySqlVoteRepository
+import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
@@ -63,6 +64,7 @@ class ArcVotesPlugin : JavaPlugin() {
                     sqlReady.set(true)
                 }
             }
+            val dailyStatus = repository?.let(::VoteDailyStatusService)
 
             val rewardService = if (settings.reward.enabled) {
                 val storage = requireNotNull(repository) { "Vote reward storage is unavailable" }
@@ -90,7 +92,7 @@ class ArcVotesPlugin : JavaPlugin() {
                         partition = MySqlOneTimeUsePartition("vote_reward"),
                     ),
                 )
-                VoteRewardService(server, runtime.tasks, storage, ledger, depositor, settings, locale, logger).also {
+                VoteRewardService(server, runtime.tasks, storage, ledger, depositor, settings, locale, logger, dailyStatus).also {
                     server.pluginManager.registerEvents(it, this)
                     it.start()
                 }
@@ -105,7 +107,7 @@ class ArcVotesPlugin : JavaPlugin() {
                 }
             } else null
 
-            val voteCommand = VoteCommand(settings, locale, ingress)
+            val voteCommand = VoteCommand(settings, locale, ingress, runtime.tasks, dailyStatus, logger)
             requireNotNull(getCommand("vote")).apply {
                 setExecutor(voteCommand)
                 tabCompleter = voteCommand

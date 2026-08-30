@@ -77,6 +77,16 @@ class MySqlVoteRepositoryIntegrationTest : FreeSpec({
         repository.findPendingForPlayers(
             setOf(NetworkPlayerName.of("Steve"), NetworkPlayerName.of("Alex")),
         ).join().getValue("steve") shouldHaveSize 1
+        repository.findVotedSources(
+            NetworkPlayerName.of("sTeVe"),
+            Instant.parse("2026-08-29T21:00:00Z"),
+            Instant.parse("2026-08-30T21:00:00Z"),
+        ).join() shouldBe setOf(MonitoringSource.HOTMC)
+        repository.findVotedSources(
+            NetworkPlayerName.of("Steve"),
+            Instant.parse("2026-08-30T21:00:00Z"),
+            Instant.parse("2026-08-31T21:00:00Z"),
+        ).join().shouldBeEmpty()
         repository.markGranted(inserted.event.id, UUID.randomUUID()).join() shouldBe true
         repository.findPending(NetworkPlayerName.of("Steve")).join().shouldBeEmpty()
     }

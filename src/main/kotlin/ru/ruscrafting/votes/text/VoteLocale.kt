@@ -43,6 +43,8 @@ class VoteLocale(
                     "prefix",
                     "commands.open-hint",
                     "commands.reward-note",
+                    "commands.vote-state-voted",
+                    "commands.vote-state-open",
                     "commands.no-permission",
                     "commands.help",
                     "commands.state-enabled",

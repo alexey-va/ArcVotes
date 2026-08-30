@@ -19,6 +19,7 @@ import java.sql.SQLException
 import java.sql.Timestamp
 import java.sql.Types
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.Locale
 import java.util.UUID
@@ -36,10 +37,19 @@ interface VoteRepository {
     fun markRecovery(eventId: UUID, playerId: UUID?, failureCode: String): CompletableFuture<Boolean>
 }
 
+fun interface VoteHistoryLookup {
+    /** Returns callback sources recorded for this player inside one bounded calendar-day window. */
+    fun findVotedSources(
+        playerName: NetworkPlayerName,
+        fromInclusive: Instant,
+        untilExclusive: Instant,
+    ): CompletableFuture<Set<MonitoringSource>>
+}
+
 class MySqlVoteRepository(
     private val runtime: SqlRuntime,
     private val clock: Clock = Clock.systemUTC(),
-) : VoteRepository {
+) : VoteRepository, VoteHistoryLookup {
     override fun initialize(): CompletableFuture<Unit> = runtime.executor
         .submit { MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(VoteMigrations.ALL) }
         .thenApply { Unit }
@@ -137,6 +147,43 @@ class MySqlVoteRepository(
                 statement.setInt(normalizedNames.size + 1, perPlayerLimit)
                 statement.executeQuery().use { rows ->
                     readEvents(rows).groupBy { it.vote.normalizedPlayerName }
+                }
+            }
+        }
+    }
+
+    override fun findVotedSources(
+        playerName: NetworkPlayerName,
+        fromInclusive: Instant,
+        untilExclusive: Instant,
+    ): CompletableFuture<Set<MonitoringSource>> {
+        require(untilExclusive.isAfter(fromInclusive)) { "Vote history window must be positive" }
+        require(Duration.between(fromInclusive, untilExclusive) <= MAXIMUM_HISTORY_WINDOW) {
+            "Vote history window must not exceed 26 hours"
+        }
+        return runtime.executor.read { connection ->
+            connection.prepareStatement(
+                """
+                SELECT DISTINCT `source`
+                FROM `arc_votes_events`
+                WHERE `player_name_normalized` = ?
+                  AND `occurred_at` >= ?
+                  AND `occurred_at` < ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, playerName.value.lowercase(Locale.ROOT))
+                statement.setTimestamp(2, Timestamp.from(fromInclusive))
+                statement.setTimestamp(3, Timestamp.from(untilExclusive))
+                statement.executeQuery().use { rows ->
+                    buildSet {
+                        while (rows.next()) {
+                            val sourceKey = rows.getString("source")
+                            add(
+                                MonitoringSource.entries.singleOrNull { it.configKey == sourceKey }
+                                    ?: error("Unknown stored vote source"),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -296,6 +343,7 @@ class MySqlVoteRepository(
         const val MAXIMUM_PLAYER_BATCH = 500
         const val MYSQL_DUPLICATE_KEY = 1062
         const val SQL_STATE_INTEGRITY_CONSTRAINT = "23000"
+        val MAXIMUM_HISTORY_WINDOW: Duration = Duration.ofHours(26)
     }
 }
 

@@ -12,13 +12,17 @@ sources:
   votes:
     path: src/main/resources/lang/ru.yml
     prefix-key: prefix
-    exclude: [prefix, reward.component-standard, reward.component-premium, reward.component-separator]
+    exclude: [prefix, commands.vote-state-voted, commands.vote-state-open, reward.component-standard, reward.component-premium, reward.component-separator]
 
 placeholders:
   minecraft_rating: '<underlined>MinecraftRating</underlined>'
+  minecraft_rating_state: '<#8fe1c2><bold>✔</bold></color>'
   hotmc: '<underlined>HotMC</underlined>'
+  hotmc_state: '<#d9bda0>◇</color>'
   monitoring_minecraft: '<underlined>MonitoringMinecraft</underlined>'
+  monitoring_minecraft_state: '<#8fe1c2><bold>✔</bold></color>'
   game_monitoring: '<underlined>GameMonitoring</underlined>'
+  game_monitoring_state: '<#d9bda0>◇</color>'
   site: HotMC
   amount: '1000'
   rewards: '<#8fe1c2><bold>+1000 монет</bold></color> <#d9bda0>·</color> <#e7bd72><bold>+3 жетона</bold></color>'

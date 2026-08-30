@@ -10,10 +10,21 @@ import net.kyori.adventure.text.event.ClickEvent
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
+import org.bukkit.entity.Player
 import ru.arc.config.ConfigManager
+import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.TestTaskScheduler
 import ru.ruscrafting.votes.config.ArcVotesSettings
+import ru.ruscrafting.votes.config.MonitoringSource
+import ru.ruscrafting.votes.storage.VoteHistoryLookup
+import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import java.util.concurrent.CompletableFuture
+import java.util.logging.Logger
 
 class VoteCommandTest : StringSpec({
     afterTest { ConfigManager.clear() }
@@ -26,8 +37,9 @@ class VoteCommandTest : StringSpec({
         val command = mockk<Command>(relaxed = true)
         val messages = mutableListOf<Component>()
         every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        val tasks = LifecycleTaskScope(TestTaskScheduler())
 
-        val vote = VoteCommand(settings, locale, null)
+        val vote = VoteCommand(settings, locale, null, tasks, null, Logger.getAnonymousLogger())
         vote.onCommand(sender, command, "vote", emptyArray()) shouldBe true
 
         messages shouldHaveSize 7
@@ -45,6 +57,49 @@ class VoteCommandTest : StringSpec({
         every { sender.hasPermission("arcvotes.admin.status") } returns true
         vote.onCommand(sender, command, "vote", arrayOf("status")) shouldBe true
         messages shouldHaveSize 9
+    }
+
+    "vote marks monitoring callbacks received during the current Moscow day" {
+        val root = Files.createTempDirectory("arcvotes-command-history")
+        val settings = ArcVotesSettings.load(root) { null }
+        val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
+        val player = mockk<Player>(relaxed = true)
+        val command = mockk<Command>(relaxed = true)
+        val messages = mutableListOf<Component>()
+        every { player.name } returns "Steve"
+        every { player.isOnline } returns true
+        every { player.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        val scheduler = TestTaskScheduler()
+        var requestedFrom: Instant? = null
+        var requestedUntil: Instant? = null
+        val history = VoteHistoryLookup { _, from, until ->
+            requestedFrom = from
+            requestedUntil = until
+            CompletableFuture.completedFuture(setOf(MonitoringSource.MINECRAFT_RATING, MonitoringSource.HOTMC))
+        }
+        val dailyStatus = VoteDailyStatusService(
+            history,
+            Clock.fixed(Instant.parse("2026-08-31T12:00:00Z"), ZoneOffset.UTC),
+        )
+        val vote = VoteCommand(
+            settings,
+            locale,
+            null,
+            LifecycleTaskScope(scheduler),
+            dailyStatus,
+            Logger.getAnonymousLogger(),
+        )
+
+        vote.onCommand(player, command, "vote", emptyArray()) shouldBe true
+        messages shouldHaveSize 0
+        scheduler.executeImmediate()
+
+        messages shouldHaveSize 7
+        requestedFrom shouldBe Instant.parse("2026-08-30T21:00:00Z")
+        requestedUntil shouldBe Instant.parse("2026-08-31T21:00:00Z")
+        val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+        plain.count { it == '✔' } shouldBe 2
+        plain.count { it == '◇' } shouldBe 2
     }
 })
 

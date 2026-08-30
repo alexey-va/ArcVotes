@@ -24,6 +24,7 @@ import ru.ruscrafting.votes.domain.RewardState
 import ru.ruscrafting.votes.domain.VoteEvent
 import ru.ruscrafting.votes.domain.VoteRewardComponent
 import ru.ruscrafting.votes.storage.VoteRepository
+import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
 import java.util.Locale
 import java.util.UUID
@@ -48,6 +49,7 @@ class VoteRewardService(
     private val settings: ArcVotesSettings,
     private val locale: VoteLocale,
     private val logger: Logger,
+    private val dailyStatus: VoteDailyStatusService? = null,
 ) : Listener {
     private val activePlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val pollInFlight = AtomicBoolean(false)
@@ -123,6 +125,7 @@ class VoteRewardService(
             return
         }
         val event = events[eventIndex]
+        dailyStatus?.observe(event)
         val components = requireNotNull(event.reward) { "Pending vote has no reward bundle" }.components
         deliverComponent(player, event, components, componentIndex = 0, anyApplied = false, events, eventIndex)
     }

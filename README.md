@@ -2,6 +2,8 @@
 
 Small Paper plugin for RusCrafting vote links, authenticated monitoring callbacks, durable deduplication, and configurable Vault plus RedisEconomy rewards.
 
+`/vote` reads accepted callbacks for the current `Europe/Moscow` calendar day and marks each monitoring that the player has already used, while keeping every destination clickable.
+
 Supported callback routes:
 
 | Monitoring | Route | Contract |
@@ -25,4 +27,4 @@ Tracked YAML contains environment-variable names only. Set the variables named i
 ./gradlew --no-daemon clean test shadowJar -ParcCoreDir=../arc-core
 ```
 
-The packaged plugin is `build/libs/ArcVotes-0.2.0.jar`. MySQL integration tests run in CI, not in the local lane.
+The packaged plugin is `build/libs/ArcVotes-0.2.1.jar`. MySQL integration tests run in CI, not in the local lane.
