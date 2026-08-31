@@ -79,14 +79,16 @@ class VoteCommandTest : StringSpec({
         messages.clear()
         every { sender.hasPermission("arcvotes.admin.status") } returns true
         vote.onCommand(sender, command, "vote", arrayOf("status")) shouldBe true
-        messages shouldHaveSize 4
+        messages shouldHaveSize 3
         val status = messages.joinToString("\n") { plain.serialize(it) }
-        status.contains("ProxyARC на Velocity") shouldBe true
+        status.contains("Админ · Голосования") shouldBe true
+        status.contains("Callback") shouldBe false
+        status.contains("ProxyARC") shouldBe false
         status.contains("ВЫКЛ") shouldBe false
         status.contains("MinecraftRating") shouldBe false
     }
 
-    "vote marks monitoring callbacks received during the current Moscow day" {
+    "vote marks monitoring callbacks received during the rolling 24 hours" {
         val root = Files.createTempDirectory("arcvotes-command-history")
         val settings = ArcVotesSettings.load(root) { null }
         val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
@@ -116,8 +118,8 @@ class VoteCommandTest : StringSpec({
         scheduler.executeImmediate()
 
         messages shouldHaveSize 7
-        requestedFrom shouldBe Instant.parse("2026-08-30T21:00:00Z")
-        requestedUntil shouldBe Instant.parse("2026-08-31T21:00:00Z")
+        requestedFrom shouldBe Instant.parse("2026-08-30T12:00:00Z")
+        requestedUntil shouldBe Instant.parse("2026-08-31T12:00:00Z")
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.count { it == '✔' } shouldBe 2
         plain.count { it == '◇' } shouldBe 2
@@ -163,7 +165,7 @@ class VoteCommandTest : StringSpec({
             .toSet()
     }
 
-    "admin check uses the bounded daily cache for another player" {
+    "admin check uses the bounded rolling cache for another player" {
         val root = Files.createTempDirectory("arcvotes-command-check")
         val settings = ArcVotesSettings.load(root) { null }
         val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
@@ -192,7 +194,7 @@ class VoteCommandTest : StringSpec({
         messages shouldHaveSize 12
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.contains("Игрок Alex") shouldBe true
-        plain.contains("Сегодня: 2 из 4") shouldBe true
+        plain.contains("За последние 24 часа: 2 из 4") shouldBe true
         plain.count { it == '✔' } shouldBe 4
         plain.count { it == '◇' } shouldBe 4
     }

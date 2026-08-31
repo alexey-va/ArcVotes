@@ -64,29 +64,72 @@ class VoteDailyStatusServiceTest : FreeSpec({
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING)
     }
 
-    "an in-flight lookup from yesterday is not reused after Moscow midnight" {
+    "Moscow midnight does not reset or duplicate the rolling lookup" {
         val clock = MutableClock(Instant.parse("2026-08-31T20:59:59Z"))
-        val replies = mutableListOf<CompletableFuture<Set<MonitoringSource>>>()
+        val pending = CompletableFuture<Set<MonitoringSource>>()
         var queries = 0
         val history = VoteHistoryLookup { _, _, _ ->
             queries += 1
-            CompletableFuture<Set<MonitoringSource>>().also(replies::add)
+            pending
         }
         val service = VoteDailyStatusService(history, clock, Duration.ofSeconds(30))
         val player = NetworkPlayerName.of("Steve")
 
-        val yesterday = service.find(player)
+        val beforeMidnight = service.find(player)
         clock.current = Instant.parse("2026-08-31T21:00:01Z")
-        val today = service.find(player)
+        val afterMidnight = service.find(player)
 
-        queries shouldBe 2
-        (today === yesterday) shouldBe false
-        replies[1].complete(setOf(MonitoringSource.GAME_MONITORING))
-        replies[0].complete(setOf(MonitoringSource.HOTMC))
-        yesterday.join() shouldBe setOf(MonitoringSource.HOTMC)
-        today.join() shouldBe setOf(MonitoringSource.GAME_MONITORING)
-        service.find(player).join() shouldBe setOf(MonitoringSource.GAME_MONITORING)
-        queries shouldBe 2
+        queries shouldBe 1
+        (afterMidnight === beforeMidnight) shouldBe true
+        pending.complete(setOf(MonitoringSource.HOTMC))
+        beforeMidnight.join() shouldBe setOf(MonitoringSource.HOTMC)
+        afterMidnight.join() shouldBe setOf(MonitoringSource.HOTMC)
+    }
+
+    "lookup covers the previous rolling 24 hours" {
+        val now = Instant.parse("2026-08-31T12:34:56Z")
+        var requestedFrom: Instant? = null
+        var requestedUntil: Instant? = null
+        val service = VoteDailyStatusService(
+            VoteHistoryLookup { _, from, until ->
+                requestedFrom = from
+                requestedUntil = until
+                CompletableFuture.completedFuture(emptySet())
+            },
+            Clock.fixed(now, ZoneId.of("UTC")),
+        )
+
+        service.find(NetworkPlayerName.of("Steve")).join()
+
+        requestedFrom shouldBe Instant.parse("2026-08-30T12:34:56Z")
+        requestedUntil shouldBe now
+    }
+
+    "observation older than 24 hours does not block voting" {
+        val now = Instant.parse("2026-08-31T12:00:00Z")
+        val service = VoteDailyStatusService(
+            VoteHistoryLookup { _, _, _ -> CompletableFuture.completedFuture(emptySet()) },
+            Clock.fixed(now, ZoneId.of("UTC")),
+        )
+        val player = NetworkPlayerName.of("Steve")
+        service.find(player).join()
+
+        service.observe(
+            VoteEvent(
+                id = java.util.UUID.randomUUID(),
+                vote = AuthenticatedVote(
+                    MonitoringSource.GAME_MONITORING,
+                    "rolling-status:expired",
+                    player,
+                    now.minus(Duration.ofHours(24)).minusMillis(1),
+                ),
+                receivedAt = now,
+                reward = null,
+                rewardState = RewardState.NONE,
+            ),
+        )
+
+        service.find(player).join() shouldBe emptySet()
     }
 })
 

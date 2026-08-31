@@ -61,6 +61,7 @@ reward:
     amount: 3.00
 
 status:
+  # Time zone used only to render timestamps in /vote history.
   vote-day-zone: Europe/Moscow
   cache-ttl-seconds: 30
   maximum-cache-entries: 2048

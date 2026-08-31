@@ -38,7 +38,7 @@ interface VoteRepository {
 }
 
 fun interface VoteHistoryLookup {
-    /** Returns callback sources recorded for this player inside one bounded calendar-day window. */
+    /** Returns callback sources recorded for this player inside one bounded time window. */
     fun findVotedSources(
         playerName: NetworkPlayerName,
         fromInclusive: Instant,

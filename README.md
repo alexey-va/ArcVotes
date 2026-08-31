@@ -2,9 +2,9 @@
 
 Small Paper plugin for RusCrafting vote links, authenticated monitoring callbacks, durable deduplication, and configurable Vault plus RedisEconomy rewards.
 
-`/vote` reads accepted callbacks for the configured vote-day calendar window and marks each monitoring that the player has already used, while keeping every destination clickable.
+`/vote` reads accepted callbacks from the rolling 24-hour window and marks each monitoring that the player has already used, while keeping every destination clickable.
 
-Administrators can use `/vote check <player>` for the same cached current-day view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only the local Paper responsibilities; on the production Paper profile it names ProxyARC on Velocity as the callback owner instead of presenting intentionally disabled local ingress adapters as failed services. History page size and the maximum accepted page number are live settings under `status`.
+Administrators can use `/vote check <player>` for the same cached rolling 24-hour view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only observable service health without exposing callback topology. History page size and the maximum accepted page number are live settings under `status`.
 
 Supported callback routes:
 
@@ -23,7 +23,7 @@ Paper reconciles pending rewards for online players every five seconds by defaul
 
 Run `/arcvotes reload` with `arcvotes.admin.reload` after editing `config.yml`, `lang/ru.yml`, `lang/en.yml`, or the plugin-local `.env`. ArcVotes reads and validates an isolated candidate first and publishes the complete generation atomically; an invalid candidate leaves the current settings, callback ingress, and reward delivery active.
 
-Live settings include locale selection and messages, monitoring enablement/presentation/authentication/network policy, reward enablement/components/amounts/currency/limits, vote-day cache settings, GameMonitoring HTTP limits, and the callback body/header/persistence/forwarded-address policy. Callback counters and in-flight requests survive reloads. Pending rows retain their original reward bundle, including a historical premium currency id.
+Live settings include locale selection and messages, monitoring enablement/presentation/authentication/network policy, reward enablement/components/amounts/currency/limits, vote-status cache settings, GameMonitoring HTTP limits, and the callback body/header/persistence/forwarded-address policy. Callback counters and in-flight requests survive reloads. Pending rows retain their original reward bundle, including a historical premium currency id.
 
 `server-id` and every `mysql` field require a plugin/server restart. While the HTTP listener remains enabled, `http.bind-address`, `http.port`, `http.worker-threads`, and `http.queue-capacity` also require a restart. Those four listener fields can instead be changed live in two reloads: disable `http.enabled`, reload, edit/re-enable, then reload again. Enabling callbacks or rewards live still requires MySQL to have been initialized at startup and the required Vault/RedisEconomy providers to be available.
 

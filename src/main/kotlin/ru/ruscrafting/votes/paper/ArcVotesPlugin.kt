@@ -72,7 +72,6 @@ class ArcVotesPlugin : JavaPlugin() {
                 VoteDailyStatusService(
                     history = it,
                     cacheTtl = Duration.ofSeconds(settings.status.cacheTtlSeconds),
-                    voteDayZone = settings.status.voteDayZone,
                     maximumCacheEntries = settings.status.maximumCacheEntries,
                 )
             }

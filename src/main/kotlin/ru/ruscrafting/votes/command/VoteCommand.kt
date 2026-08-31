@@ -337,7 +337,7 @@ class VoteCommand(
             .whenCompleteSync(tasks) { votedSources, failure ->
                 if (!sender.isOnline) return@whenCompleteSync
                 if (failure != null) {
-                    logger.log(Level.WARNING, "Could not load today's vote status for /vote", failure)
+                    logger.log(Level.WARNING, "Could not load recent vote status for /vote", failure)
                     renderVoteList(sender, emptySet(), runtime)
                 } else {
                     renderVoteList(sender, votedSources.orEmpty(), runtime)
