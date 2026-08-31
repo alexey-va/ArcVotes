@@ -64,4 +64,37 @@ class VoteDailyStatusServiceTest : FreeSpec({
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING)
     }
 
+    "an in-flight lookup from yesterday is not reused after Moscow midnight" {
+        val clock = MutableClock(Instant.parse("2026-08-31T20:59:59Z"))
+        val replies = mutableListOf<CompletableFuture<Set<MonitoringSource>>>()
+        var queries = 0
+        val history = VoteHistoryLookup { _, _, _ ->
+            queries += 1
+            CompletableFuture<Set<MonitoringSource>>().also(replies::add)
+        }
+        val service = VoteDailyStatusService(history, clock, Duration.ofSeconds(30))
+        val player = NetworkPlayerName.of("Steve")
+
+        val yesterday = service.find(player)
+        clock.current = Instant.parse("2026-08-31T21:00:01Z")
+        val today = service.find(player)
+
+        queries shouldBe 2
+        (today === yesterday) shouldBe false
+        replies[1].complete(setOf(MonitoringSource.GAME_MONITORING))
+        replies[0].complete(setOf(MonitoringSource.HOTMC))
+        yesterday.join() shouldBe setOf(MonitoringSource.HOTMC)
+        today.join() shouldBe setOf(MonitoringSource.GAME_MONITORING)
+        service.find(player).join() shouldBe setOf(MonitoringSource.GAME_MONITORING)
+        queries shouldBe 2
+    }
 })
+
+private class MutableClock(
+    var current: Instant,
+    private val clockZone: ZoneId = ZoneId.of("UTC"),
+) : Clock() {
+    override fun getZone(): ZoneId = clockZone
+    override fun withZone(zone: ZoneId): Clock = MutableClock(current, zone)
+    override fun instant(): Instant = current
+}

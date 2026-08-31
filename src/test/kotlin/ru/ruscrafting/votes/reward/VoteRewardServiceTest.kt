@@ -236,7 +236,6 @@ class VoteRewardServiceTest : FreeSpec({
         repository.recoveries shouldContainExactly listOf(Triple(event.id, player.uniqueId, "claim_recovered"))
         repository.granted shouldBe emptyList()
     }
-
 })
 
 private fun service(
