@@ -27,4 +27,4 @@ Tracked YAML contains environment-variable names only. Set the variables named i
 ./gradlew --no-daemon clean test shadowJar -ParcCoreDir=../arc-core
 ```
 
-The packaged plugin is `build/libs/ArcVotes-0.2.1.jar`. MySQL integration tests run in CI, not in the local lane.
+The packaged plugin is `build/libs/ArcVotes-0.2.2.jar`. MySQL integration tests run in CI, not in the local lane.

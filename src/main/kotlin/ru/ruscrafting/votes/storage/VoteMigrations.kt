@@ -55,9 +55,24 @@ object VoteMigrations {
         ),
     )
 
+    val NETWORK_WIDE_REWARD_CLAIMS = SqlMigration(
+        version = 4,
+        description = "make pending vote reward claims network-wide",
+        statements = listOf(
+            """
+            UPDATE `arc_one_time_uses`
+            SET `claim_scope` = NULL
+            WHERE `purpose` = 'vote_reward'
+              AND `status` = 'CLAIMED'
+              AND `claim_scope` IS NOT NULL
+            """.trimIndent(),
+        ),
+    )
+
     val ALL = listOf(
         EVENTS,
         MySqlOneTimeUseLedger.createTableMigration(version = 2),
         REWARD_COMPONENTS,
+        NETWORK_WIDE_REWARD_CLAIMS,
     )
 }

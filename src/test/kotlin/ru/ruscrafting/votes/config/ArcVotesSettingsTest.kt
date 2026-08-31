@@ -7,6 +7,7 @@ import ru.arc.config.ConfigManager
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
 import kotlin.io.path.readText
+import kotlin.io.path.writeText
 
 class ArcVotesSettingsTest : StringSpec({
     afterTest { ConfigManager.clear() }
@@ -40,5 +41,55 @@ class ArcVotesSettingsTest : StringSpec({
         shouldThrow<IllegalArgumentException> {
             NetworkSourcePolicy(enforceIpAllowlist = false, allowedIps = setOf(":::"))
         }
+    }
+
+    "legacy reward amount is preserved without silently enabling premium rewards" {
+        val root = Files.createTempDirectory("arcvotes-legacy-settings")
+        root.resolve("config.yml").writeText(
+            """
+            mysql:
+              enabled: true
+            reward:
+              enabled: true
+              amount: 100.00
+              currency-label: монет
+            """.trimIndent(),
+        )
+        ArcVotesSettings.mergeDefaults(root)
+
+        val settings = ArcVotesSettings.load(root) { "test-secret" }
+
+        settings.reward.standard.amount.compareTo(java.math.BigDecimal("100.00")) shouldBe 0
+        settings.reward.premium.enabled shouldBe false
+    }
+
+    "malformed legacy reward amount fails before bundled rewards are merged" {
+        val root = Files.createTempDirectory("arcvotes-malformed-legacy-settings")
+        root.resolve("config.yml").writeText(
+            """
+            reward:
+              enabled: true
+              amount: nope
+            """.trimIndent(),
+        )
+
+        shouldThrow<IllegalArgumentException> {
+            ArcVotesSettings.mergeDefaults(root)
+        }.message shouldBe "Legacy reward.amount must be a decimal"
+    }
+
+    "missing legacy reward amount fails before bundled rewards are merged" {
+        val root = Files.createTempDirectory("arcvotes-missing-legacy-settings")
+        root.resolve("config.yml").writeText(
+            """
+            reward:
+              enabled: true
+              currency-label: монет
+            """.trimIndent(),
+        )
+
+        shouldThrow<IllegalArgumentException> {
+            ArcVotesSettings.mergeDefaults(root)
+        }.message shouldBe "Legacy reward.amount is required"
     }
 })

@@ -26,7 +26,7 @@ class VoteDailyStatusService(
     private val cacheTtl: Duration = Duration.ofSeconds(30),
 ) {
     private val cache = ConcurrentHashMap<String, CachedStatus>()
-    private val inFlight = ConcurrentHashMap<String, CompletableFuture<Set<MonitoringSource>>>()
+    private val inFlight = ConcurrentHashMap<LookupKey, CompletableFuture<Set<MonitoringSource>>>()
 
     init {
         require(!cacheTtl.isNegative && !cacheTtl.isZero && cacheTtl <= MAXIMUM_CACHE_TTL) {
@@ -38,16 +38,18 @@ class VoteDailyStatusService(
         val now = clock.instant()
         val day = day(now)
         val key = playerName.value.lowercase(Locale.ROOT)
-        cache[key]?.takeIf { it.day == day && now.isBefore(it.expiresAt) }?.let {
+        val cached = cache[key]
+        cached?.takeIf { it.day == day && now.isBefore(it.expiresAt) }?.let {
             return CompletableFuture.completedFuture(it.sources)
         }
-        cache.remove(key)
+        if (cached != null) cache.remove(key, cached)
         trimExpired(now)
 
         val from = day.atStartOfDay(VOTE_DAY_ZONE).toInstant()
         val until = day.plusDays(1).atStartOfDay(VOTE_DAY_ZONE).toInstant()
+        val lookupKey = LookupKey(key, day)
         val promise = CompletableFuture<Set<MonitoringSource>>()
-        inFlight.putIfAbsent(key, promise)?.let { return it }
+        inFlight.putIfAbsent(lookupKey, promise)?.let { return it }
         try {
             history.findVotedSources(playerName, from, until).whenComplete { sources, failure ->
                 if (failure != null) {
@@ -55,8 +57,11 @@ class VoteDailyStatusService(
                 } else {
                     val immutable = sources.orEmpty().toSet()
                     val completedAt = clock.instant()
-                    if (cache.size < MAXIMUM_CACHE_ENTRIES) {
-                        cache[key] = CachedStatus(day, completedAt.plus(cacheTtl), immutable)
+                    if (cache.size < MAXIMUM_CACHE_ENTRIES || cache.containsKey(key)) {
+                        val completed = CachedStatus(day, completedAt.plus(cacheTtl), immutable)
+                        cache.compute(key) { _, current ->
+                            if (current == null || !current.day.isAfter(day)) completed else current
+                        }
                     }
                     promise.complete(immutable)
                 }
@@ -64,7 +69,7 @@ class VoteDailyStatusService(
         } catch (failure: Throwable) {
             promise.completeExceptionally(failure)
         }
-        promise.whenComplete { _, _ -> inFlight.remove(key, promise) }
+        promise.whenComplete { _, _ -> inFlight.remove(lookupKey, promise) }
         return promise
     }
 
@@ -90,6 +95,11 @@ class VoteDailyStatusService(
         val day: LocalDate,
         val expiresAt: Instant,
         val sources: Set<MonitoringSource>,
+    )
+
+    private data class LookupKey(
+        val playerName: String,
+        val day: LocalDate,
     )
 
     private companion object {

@@ -6,9 +6,16 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import ru.arc.network.NetworkPlayerName
+import ru.arc.onetime.OneTimeUseAbandonResult
+import ru.arc.onetime.OneTimeUseClaimRequest
+import ru.arc.onetime.OneTimeUseClaimResult
+import ru.arc.onetime.OneTimeUseFingerprint
+import ru.arc.onetime.OneTimeUseIdentity
 import ru.arc.sql.SqlConnectionConfig
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.SqlSslMode
+import ru.arc.sql.onetime.MySqlOneTimeUseLedger
+import ru.arc.sql.onetime.MySqlOneTimeUsePartition
 import ru.arc.testing.containers.MySqlTestService
 import ru.arc.testing.containers.MySqlTestSettings
 import ru.ruscrafting.votes.config.MonitoringSource
@@ -18,36 +25,41 @@ import ru.ruscrafting.votes.domain.VoteRecordResult
 import ru.ruscrafting.votes.domain.VoteRewardBundle
 import ru.ruscrafting.votes.domain.VoteRewardComponent
 import java.math.BigDecimal
+import java.nio.ByteBuffer
+import java.sql.Connection
+import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
 class MySqlVoteRepositoryIntegrationTest : FreeSpec({
-    lateinit var mysql: MySqlTestService
-    lateinit var runtime: SqlRuntime
+    var mysql: MySqlTestService? = null
+    var runtime: SqlRuntime? = null
     lateinit var repository: MySqlVoteRepository
 
     beforeSpec {
-        mysql = MySqlTestService.start(MySqlTestSettings(database = "arc_votes_test"))
-        runtime = SqlRuntime.create(
+        val mysqlService = MySqlTestService.start(MySqlTestSettings(database = "arc_votes_test"))
+        mysql = mysqlService
+        val sqlRuntime = SqlRuntime.create(
             SqlConnectionConfig(
-                host = mysql.endpoint.host,
-                port = mysql.endpoint.port,
-                database = mysql.endpoint.database,
-                username = mysql.endpoint.username,
-                password = mysql.endpoint.password,
+                host = mysqlService.endpoint.host,
+                port = mysqlService.endpoint.port,
+                database = mysqlService.endpoint.database,
+                username = mysqlService.endpoint.username,
+                password = mysqlService.endpoint.password,
                 sslMode = SqlSslMode.DISABLED,
                 minimumIdle = 0,
                 maximumPoolSize = 2,
             ),
             "arc-votes-test",
         )
-        repository = MySqlVoteRepository(runtime)
+        runtime = sqlRuntime
+        repository = MySqlVoteRepository(sqlRuntime)
         repository.initialize().join()
     }
 
     afterSpec {
-        runtime.close()
-        mysql.close()
+        runtime?.close()
+        mysql?.close()
     }
 
     "callback retries are durable duplicates and identity conflicts fail closed" {
@@ -90,4 +102,95 @@ class MySqlVoteRepositoryIntegrationTest : FreeSpec({
         repository.markGranted(inserted.event.id, UUID.randomUUID()).join() shouldBe true
         repository.findPending(NetworkPlayerName.of("Steve")).join().shouldBeEmpty()
     }
+
+    "migration 4 repairs retained vote claims without changing committed or foreign rows" {
+        val sqlRuntime = requireNotNull(runtime)
+        val retained = OneTimeUseIdentity(UUID.randomUUID(), OneTimeUseFingerprint.sha256Fields("retained"))
+        val committed = OneTimeUseIdentity(UUID.randomUUID(), OneTimeUseFingerprint.sha256Fields("committed"))
+        val foreign = OneTimeUseIdentity(UUID.randomUUID(), OneTimeUseFingerprint.sha256Fields("foreign"))
+        val claimantId = UUID.randomUUID()
+
+        sqlRuntime.executor.write { connection ->
+            connection.insertOneTimeUse("vote_reward", retained, claimantId, "spawn", "CLAIMED")
+            connection.insertOneTimeUse("vote_reward", committed, claimantId, "survival", "COMMITTED")
+            connection.insertOneTimeUse("another_purpose", foreign, claimantId, "parkour", "CLAIMED")
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(VoteMigrations.NETWORK_WIDE_REWARD_CLAIMS.statements.single())
+            }
+        }.join() shouldBe 1
+
+        val stored = sqlRuntime.executor.read { connection ->
+            connection.prepareStatement(
+                "SELECT `use_id`, `status`, `claim_scope` FROM `arc_one_time_uses` WHERE `use_id` IN (?, ?, ?)",
+            ).use { statement ->
+                statement.setBytes(1, retained.useId.bytes())
+                statement.setBytes(2, committed.useId.bytes())
+                statement.setBytes(3, foreign.useId.bytes())
+                statement.executeQuery().use { rows ->
+                    buildMap {
+                        while (rows.next()) {
+                            put(rows.getBytes("use_id").uuid(), rows.getString("status") to rows.getString("claim_scope"))
+                        }
+                    }
+                }
+            }
+        }.join()
+        stored.getValue(retained.useId) shouldBe ("CLAIMED" to null)
+        stored.getValue(committed.useId) shouldBe ("COMMITTED" to "survival")
+        stored.getValue(foreign.useId) shouldBe ("CLAIMED" to "parkour")
+
+        val ledger = MySqlOneTimeUseLedger.attach(
+            sqlRuntime,
+            "arc-votes-migration-test",
+            MySqlOneTimeUsePartition("vote_reward"),
+        )
+        try {
+            val request = OneTimeUseClaimRequest(retained, retained.useId, claimantId)
+            val acquired = ledger.claim(request).join().shouldBeInstanceOf<OneTimeUseClaimResult.Acquired>()
+            acquired.claim.newlyCreated shouldBe false
+            acquired.claim.scope shouldBe null
+            ledger.abandon(acquired.claim).join() shouldBe OneTimeUseAbandonResult.RETAINED_FOR_RECOVERY
+        } finally {
+            ledger.close()
+        }
+    }
 })
+
+private fun Connection.insertOneTimeUse(
+    purpose: String,
+    identity: OneTimeUseIdentity,
+    claimantId: UUID,
+    scope: String,
+    status: String,
+) {
+    prepareStatement(
+        """
+        INSERT INTO `arc_one_time_uses`
+            (`purpose`, `use_id`, `fingerprint`, `claimant_id`, `claim_id`, `claim_scope`,
+             `status`, `claimed_at`, `committed_at`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent(),
+    ).use { statement ->
+        statement.setString(1, purpose)
+        statement.setBytes(2, identity.useId.bytes())
+        statement.setBytes(3, identity.fingerprint.bytes())
+        statement.setBytes(4, claimantId.bytes())
+        statement.setBytes(5, identity.useId.bytes())
+        statement.setString(6, scope)
+        statement.setString(7, status)
+        statement.setTimestamp(8, Timestamp.from(Instant.parse("2026-08-30T12:00:00Z")))
+        statement.setTimestamp(9, if (status == "COMMITTED") Timestamp.from(Instant.parse("2026-08-30T12:00:01Z")) else null)
+        statement.executeUpdate()
+    }
+}
+
+private fun UUID.bytes(): ByteArray = ByteBuffer.allocate(16)
+    .putLong(mostSignificantBits)
+    .putLong(leastSignificantBits)
+    .array()
+
+private fun ByteArray.uuid(): UUID {
+    require(size == 16) { "Invalid UUID byte length" }
+    val buffer = ByteBuffer.wrap(this)
+    return UUID(buffer.long, buffer.long)
+}
