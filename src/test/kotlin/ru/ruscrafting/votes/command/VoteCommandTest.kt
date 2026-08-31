@@ -14,6 +14,7 @@ import org.bukkit.entity.Player
 import ru.arc.config.ConfigManager
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.TestTaskScheduler
+import ru.ruscrafting.votes.callback.VoteIngressService
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.MonitoringSource
 import ru.ruscrafting.votes.domain.AuthenticatedVote
@@ -51,7 +52,8 @@ class VoteCommandTest : StringSpec({
         every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
         val tasks = LifecycleTaskScope(TestTaskScheduler())
 
-        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
+        val ingress = mockk<VoteIngressService>(relaxed = true)
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, ingress, null, false, false))
         val vote = VoteCommand(live::current, tasks, Logger.getAnonymousLogger())
         vote.onCommand(sender, command, "vote", emptyArray()) shouldBe true
 

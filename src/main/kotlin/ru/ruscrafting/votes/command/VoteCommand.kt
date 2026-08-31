@@ -68,6 +68,7 @@ class VoteCommand(
             return
         }
         val ingress = runtime.ingress
+        val localIngressEnabled = runtime.settings.http.enabled && ingress != null
         val values = mapOf(
             "mysql" to state(runtime, sender, runtime.settings.sql != null),
             "reward" to state(
@@ -75,15 +76,15 @@ class VoteCommand(
                 sender,
                 runtime.settings.reward.enabled && runtime.vaultReady && runtime.redisEconomyReady,
             ),
-            "callback" to state(runtime, sender, ingress != null),
+            "callback" to state(runtime, sender, localIngressEnabled),
             "source_count" to runtime.locale.text(runtime.settings.enabledSources.size),
         )
         runtime.locale.renderLines(
-            if (ingress == null) "commands.status" else "commands.status-ingress",
+            if (localIngressEnabled) "commands.status-ingress" else "commands.status",
             sender,
             values,
         ).forEach(sender::sendMessage)
-        ingress?.snapshot()?.let { snapshot ->
+        ingress?.takeIf { localIngressEnabled }?.snapshot()?.let { snapshot ->
             runtime.locale.renderLines(
                 "commands.counters",
                 sender,
