@@ -82,7 +82,7 @@ monitorings:
   hotmc:
     enabled: false
     display-name: HotMC
-    vote-url: https://hotmc.ru/minecraft-server-242482
+    vote-url: https://hotmc.ru/vote-242482
     secret-env: ARC_VOTES_HOTMC_SECRET
     maximum-age-seconds: 691200
     maximum-future-skew-seconds: 300
@@ -96,7 +96,7 @@ monitorings:
   monitoring-minecraft:
     enabled: false
     display-name: MonitoringMinecraft
-    vote-url: https://monitoringminecraft.com/server/43/
+    vote-url: https://monitoringminecraft.com/vote/43/
     secret-env: ARC_VOTES_MONITORING_MINECRAFT_SECRET
     expected-server-id: '43'
     maximum-age-seconds: 691200

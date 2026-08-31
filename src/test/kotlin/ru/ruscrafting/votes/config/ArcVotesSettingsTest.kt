@@ -38,6 +38,10 @@ class ArcVotesSettingsTest : StringSpec({
         settings.status.maximumCacheEntries shouldBe 2048
         settings.status.historyPageSize shouldBe 8
         settings.status.historyMaximumPages shouldBe 1000
+        settings.presentations.getValue(MonitoringSource.HOTMC).voteUrl shouldBe
+            URI("https://hotmc.ru/vote-242482")
+        settings.presentations.getValue(MonitoringSource.MONITORING_MINECRAFT).voteUrl shouldBe
+            URI("https://monitoringminecraft.com/vote/43/")
         settings.enabledSources shouldBe emptySet()
         VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale }).validate()
     }
