@@ -73,7 +73,6 @@ class ArcVotesPlugin : JavaPlugin() {
                     history = it,
                     cacheTtl = Duration.ofSeconds(settings.status.cacheTtlSeconds),
                     maximumCacheEntries = settings.status.maximumCacheEntries,
-                    voteDayZone = settings.status.voteDayZone,
                 )
             }
             val rewardRuntimeFactory = VoteRewardRuntimeFactory(::createRewardRuntime)

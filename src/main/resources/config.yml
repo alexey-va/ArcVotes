@@ -61,7 +61,7 @@ reward:
     amount: 3.00
 
 status:
-  # Time zone used for HotMC's calendar-day reset and /vote history timestamps.
+  # Time zone used for /vote history timestamps.
   vote-day-zone: Europe/Moscow
   cache-ttl-seconds: 30
   maximum-cache-entries: 2048

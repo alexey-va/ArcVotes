@@ -53,10 +53,10 @@ class VoteDailyStatusServiceTest : FreeSpec({
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING)
     }
 
-    "HotMC resets at Moscow midnight without waiting for cache TTL" {
-        val clock = MutableClock(Instant.parse("2026-08-31T20:59:59Z"))
+    "HotMC remains active for 24 hours across Moscow midnight" {
+        val clock = MutableClock(Instant.parse("2026-08-31T23:17:00Z"))
         var queries = 0
-        val voteAt = Instant.parse("2026-08-31T20:00:00Z")
+        val voteAt = Instant.parse("2026-08-31T20:17:00Z")
         val service = VoteDailyStatusService(
             history = VoteHistoryLookup { _, _, _ ->
                 queries += 1
@@ -64,14 +64,15 @@ class VoteDailyStatusServiceTest : FreeSpec({
             },
             clock = clock,
             cacheTtl = Duration.ofMinutes(5),
-            voteDayZone = ZoneId.of("Europe/Moscow"),
         )
         val player = NetworkPlayerName.of("Steve")
 
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC)
-        clock.current = Instant.parse("2026-08-31T21:00:01Z")
+        clock.current = Instant.parse("2026-09-01T20:16:59Z")
+        service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC)
+        clock.current = Instant.parse("2026-09-01T20:17:00Z")
         service.find(player).join() shouldBe emptySet()
-        queries shouldBe 2
+        queries shouldBe 3
     }
 
     "each provider uses its published repeat-vote window" {
@@ -81,14 +82,13 @@ class VoteDailyStatusServiceTest : FreeSpec({
                 CompletableFuture.completedFuture(
                     mapOf(
                         MonitoringSource.MINECRAFT_RATING to now.minus(Duration.ofHours(23)),
-                        MonitoringSource.HOTMC to Instant.parse("2026-08-30T21:30:00Z"),
+                        MonitoringSource.HOTMC to now.minus(Duration.ofHours(23)),
                         MonitoringSource.MONITORING_MINECRAFT to now.minus(Duration.ofHours(24)),
                         MonitoringSource.GAME_MONITORING to now.minus(Duration.ofHours(12)),
                     ),
                 )
             },
             clock = Clock.fixed(now, ZoneId.of("UTC")),
-            voteDayZone = ZoneId.of("Europe/Moscow"),
         )
 
         service.find(NetworkPlayerName.of("Steve")).join() shouldBe setOf(

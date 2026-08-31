@@ -7,7 +7,6 @@ import ru.ruscrafting.votes.storage.VoteHistoryLookup
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
 import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -24,9 +23,8 @@ class VoteDailyStatusService(
     private val clock: Clock = Clock.systemUTC(),
     private val cacheTtl: Duration = Duration.ofSeconds(30),
     private val maximumCacheEntries: Int = 2_048,
-    voteDayZone: ZoneId = ZoneId.of("Europe/Moscow"),
 ) {
-    private val windows = VoteWindowPolicy(voteDayZone)
+    private val windows = VoteWindowPolicy()
     private val cache = ConcurrentHashMap<String, CachedStatus>()
     private val inFlight = ConcurrentHashMap<String, CompletableFuture<Set<MonitoringSource>>>()
 

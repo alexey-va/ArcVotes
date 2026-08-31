@@ -103,7 +103,6 @@ class ArcVotesReloadController(
                 history = it,
                 cacheTtl = Duration.ofSeconds(settings.status.cacheTtlSeconds),
                 maximumCacheEntries = settings.status.maximumCacheEntries,
-                voteDayZone = settings.status.voteDayZone,
             )
         }
         val ingress = repository?.let {
