@@ -2,7 +2,7 @@
 
 Small Paper plugin for RusCrafting vote links, authenticated monitoring callbacks, durable deduplication, and configurable Vault plus RedisEconomy rewards.
 
-`/vote` reads accepted callbacks and marks each monitoring while that provider still considers the vote active, while keeping every destination clickable. [MinecraftRating](https://minecraftrating.ru/faq.html) and [MonitoringMinecraft](https://monitoringminecraft.com/promote/) document rolling 24-hour windows, while [GameMonitoring](https://gamemonitoring.ru/minecraft/servers/14210383/vote) documents 12 hours. [HotMC](https://hotmc.ru/vote-242482) says one vote per day; its observed rejection after a date boundary establishes a rolling 24-hour window rather than a calendar-day reset.
+`/vote` reads accepted callbacks and marks each monitoring while that provider still considers the vote active, while keeping every destination clickable. [MinecraftRating](https://minecraftrating.ru/faq.html) and [MonitoringMinecraft](https://monitoringminecraft.com/promote/) document rolling 24-hour windows, while [GameMonitoring](https://gamemonitoring.ru/minecraft/servers/14210383/vote) documents 12 hours. [HotMC](https://hotmc.ru/vote-242482) says one vote per day; observed availability establishes its day boundary at 00:00 UTC (03:00 Europe/Moscow).
 
 Administrators can use `/vote check <player>` for the same cached provider-specific view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only observable service health without exposing callback topology. History page size and the maximum accepted page number are live settings under `status`.
 

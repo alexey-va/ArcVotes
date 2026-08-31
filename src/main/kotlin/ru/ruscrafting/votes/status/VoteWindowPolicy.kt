@@ -3,6 +3,7 @@ package ru.ruscrafting.votes.status
 import ru.ruscrafting.votes.config.MonitoringSource
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneOffset
 
 /** Repeat-vote windows enforced by each monitoring. */
 internal class VoteWindowPolicy {
@@ -13,9 +14,15 @@ internal class VoteWindowPolicy {
 
     fun activeUntil(source: MonitoringSource, voteAt: Instant): Instant = when (source) {
         MonitoringSource.MINECRAFT_RATING,
-        MonitoringSource.HOTMC,
         MonitoringSource.MONITORING_MINECRAFT,
         -> voteAt.plus(Duration.ofHours(24))
+
+        MonitoringSource.HOTMC -> voteAt
+            .atZone(ZoneOffset.UTC)
+            .toLocalDate()
+            .plusDays(1)
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant()
 
         MonitoringSource.GAME_MONITORING -> voteAt.plus(Duration.ofHours(12))
     }

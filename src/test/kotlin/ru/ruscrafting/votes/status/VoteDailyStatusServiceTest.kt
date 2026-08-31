@@ -53,8 +53,8 @@ class VoteDailyStatusServiceTest : FreeSpec({
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING)
     }
 
-    "HotMC remains active for 24 hours across Moscow midnight" {
-        val clock = MutableClock(Instant.parse("2026-08-31T23:17:00Z"))
+    "HotMC resets at UTC midnight without waiting for cache TTL" {
+        val clock = MutableClock(Instant.parse("2026-08-31T23:59:59Z"))
         var queries = 0
         val voteAt = Instant.parse("2026-08-31T20:17:00Z")
         val service = VoteDailyStatusService(
@@ -68,11 +68,9 @@ class VoteDailyStatusServiceTest : FreeSpec({
         val player = NetworkPlayerName.of("Steve")
 
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC)
-        clock.current = Instant.parse("2026-09-01T20:16:59Z")
-        service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC)
-        clock.current = Instant.parse("2026-09-01T20:17:00Z")
+        clock.current = Instant.parse("2026-09-01T00:00:00Z")
         service.find(player).join() shouldBe emptySet()
-        queries shouldBe 3
+        queries shouldBe 2
     }
 
     "each provider uses its published repeat-vote window" {
@@ -82,7 +80,7 @@ class VoteDailyStatusServiceTest : FreeSpec({
                 CompletableFuture.completedFuture(
                     mapOf(
                         MonitoringSource.MINECRAFT_RATING to now.minus(Duration.ofHours(23)),
-                        MonitoringSource.HOTMC to now.minus(Duration.ofHours(23)),
+                        MonitoringSource.HOTMC to now.minus(Duration.ofHours(3)),
                         MonitoringSource.MONITORING_MINECRAFT to now.minus(Duration.ofHours(24)),
                         MonitoringSource.GAME_MONITORING to now.minus(Duration.ofHours(12)),
                     ),
