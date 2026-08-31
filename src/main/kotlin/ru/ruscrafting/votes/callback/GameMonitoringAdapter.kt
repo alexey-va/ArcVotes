@@ -6,7 +6,6 @@ import ru.ruscrafting.votes.config.GameMonitoringSettings
 import ru.ruscrafting.votes.config.MonitoringSource
 import ru.ruscrafting.votes.domain.AuthenticatedVote
 import java.io.InputStream
-import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -82,8 +81,9 @@ class GameMonitoringAdapter(
 }
 
 class HttpGameMonitoringVoteLookup(
+    private val settings: GameMonitoringSettings,
     private val client: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
+        .connectTimeout(Duration.ofMillis(settings.connectTimeoutMs))
         .followRedirects(HttpClient.Redirect.NEVER)
         .build(),
 ) : GameMonitoringVoteLookup {
@@ -91,16 +91,11 @@ class HttpGameMonitoringVoteLookup(
         if (!eventId.matches(GAME_MONITORING_EVENT_ID)) {
             return CompletableFuture.failedFuture(CallbackRejected(400, "invalid_event_id"))
         }
-        val request = HttpRequest.newBuilder(URI.create("https://api.gamemonitoring.ru/votes/$eventId"))
-            .timeout(Duration.ofSeconds(4))
-            .header("Accept", "application/json")
-            .header("User-Agent", "ArcVotes/0.1")
-            .GET()
-            .build()
+        val request = requestFor(eventId)
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream()).thenApply { response ->
             response.body().use { body ->
                 if (response.statusCode() != 200) throw CallbackUpstreamFailure("upstream_status")
-                val bytes = body.readLimited(MAXIMUM_RESPONSE_BYTES)
+                val bytes = body.readLimited(settings.maximumResponseBytes)
                 val root = JsonBodyParser.parseTree(bytes)
                 val payload = root["response"]?.takeIf(JsonNode::isObject)
                     ?: throw CallbackUpstreamFailure("missing_upstream_response")
@@ -126,9 +121,13 @@ class HttpGameMonitoringVoteLookup(
         }
     }
 
-    private companion object {
-        const val MAXIMUM_RESPONSE_BYTES = 32 * 1_024
-    }
+    internal fun requestFor(eventId: String): HttpRequest = HttpRequest.newBuilder(settings.apiBaseUrl.resolve(eventId))
+        .timeout(Duration.ofMillis(settings.requestTimeoutMs))
+        .header("Accept", "application/json")
+        .header("User-Agent", "ArcVotes")
+        .GET()
+        .build()
+
 }
 
 private val GAME_MONITORING_EVENT_ID = Regex("[A-Za-z0-9-]{1,100}")

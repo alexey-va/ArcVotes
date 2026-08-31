@@ -6,6 +6,9 @@ import io.kotest.matchers.shouldBe
 import ru.arc.config.ConfigManager
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
+import java.net.URI
+import java.time.ZoneId
+import kotlin.io.path.writeText
 import kotlin.io.path.readText
 
 class ArcVotesSettingsTest : StringSpec({
@@ -22,6 +25,17 @@ class ArcVotesSettingsTest : StringSpec({
         settings.reward.standard.amount.compareTo(java.math.BigDecimal("1000")) shouldBe 0
         settings.reward.premium.amount.compareTo(java.math.BigDecimal("3")) shouldBe 0
         settings.reward.premium.currencyId shouldBe "tokens"
+        settings.reward.maximumOnlinePlayerBatch shouldBe 500
+        settings.http.maximumHeaderCount shouldBe 32
+        settings.http.maximumHeaderBytes shouldBe 8192
+        settings.http.maximumHeaderValueBytes shouldBe 4096
+        settings.gameMonitoring.connectTimeoutMs shouldBe 3000L
+        settings.gameMonitoring.requestTimeoutMs shouldBe 4000L
+        settings.gameMonitoring.maximumResponseBytes shouldBe 32768
+        settings.gameMonitoring.apiBaseUrl shouldBe URI("https://api.gamemonitoring.ru/votes/")
+        settings.status.voteDayZone shouldBe ZoneId.of("Europe/Moscow")
+        settings.status.cacheTtlSeconds shouldBe 30L
+        settings.status.maximumCacheEntries shouldBe 2048
         settings.enabledSources shouldBe emptySet()
         VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale }).validate()
     }
@@ -41,4 +55,56 @@ class ArcVotesSettingsTest : StringSpec({
             NetworkSourcePolicy(enforceIpAllowlist = false, allowedIps = setOf(":::"))
         }
     }
+
+    "fresh load reads disk changes without replacing the cached config" {
+        val root = Files.createTempDirectory("arcvotes-fresh-settings")
+        val initial = ArcVotesSettings.load(root) { null }
+        root.resolve("config.yml").writeText(root.resolve("config.yml").readText().replace("cache-ttl-seconds: 30", "cache-ttl-seconds: 90"))
+
+        initial.status.cacheTtlSeconds shouldBe 30L
+        ArcVotesSettings.loadFresh(root) { null }.status.cacheTtlSeconds shouldBe 90L
+        ArcVotesSettings.load(root) { null }.status.cacheTtlSeconds shouldBe 30L
+    }
+
+    "new limits reject unsafe values" {
+        shouldThrow<IllegalArgumentException> { StatusSettings(cacheTtlSeconds = 0) }
+        shouldThrow<IllegalArgumentException> {
+            HttpSettings(
+                enabled = false,
+                bindAddress = java.net.InetAddress.getLoopbackAddress(),
+                port = 1,
+                workerThreads = 1,
+                queueCapacity = 8,
+                maximumBodyBytes = 1024,
+                persistenceTimeoutMs = 500,
+                trustSingleForwardedClientIp = true,
+                maximumHeaderCount = 8,
+                maximumHeaderBytes = 1024,
+                maximumHeaderValueBytes = 2048,
+            )
+        }
+        shouldThrow<IllegalArgumentException> {
+            GameMonitoringSettings(
+                enabled = false,
+                presentation = SourcePresentation("GameMonitoring", URI("https://example.test/vote")),
+                webhookToken = null,
+                expectedEntityType = "server",
+                expectedEntityId = "1",
+                network = NetworkSourcePolicy(false, emptySet()),
+                apiBaseUrl = URI("https://evil.example/votes/"),
+            )
+        }
+        shouldThrow<IllegalArgumentException> {
+            GameMonitoringSettings(
+                enabled = false,
+                presentation = SourcePresentation("GameMonitoring", URI("https://example.test/vote")),
+                webhookToken = null,
+                expectedEntityType = "server",
+                expectedEntityId = "1",
+                network = NetworkSourcePolicy(false, emptySet()),
+                apiBaseUrl = URI("https://user@api.gamemonitoring.ru/votes/"),
+            )
+        }
+    }
+
 })

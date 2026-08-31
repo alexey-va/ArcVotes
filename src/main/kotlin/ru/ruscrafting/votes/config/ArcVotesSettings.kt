@@ -12,6 +12,7 @@ import java.net.InetAddress
 import java.net.Inet6Address
 import java.net.URI
 import java.nio.file.Path
+import java.time.ZoneId
 import java.util.Locale
 
 enum class MonitoringSource(val configKey: String) {
@@ -30,6 +31,9 @@ data class HttpSettings(
     val maximumBodyBytes: Int,
     val persistenceTimeoutMs: Long,
     val trustSingleForwardedClientIp: Boolean,
+    val maximumHeaderCount: Int = 32,
+    val maximumHeaderBytes: Int = 8192,
+    val maximumHeaderValueBytes: Int = 4096,
 ) {
     init {
         require(bindAddress.isLoopbackAddress) { "http.bind-address must be a loopback address" }
@@ -38,6 +42,10 @@ data class HttpSettings(
         require(queueCapacity in 8..1_024) { "http.queue-capacity must be between 8 and 1024" }
         require(maximumBodyBytes in 1_024..65_536) { "http.maximum-body-bytes must be between 1024 and 65536" }
         require(persistenceTimeoutMs in 500..30_000) { "http.persistence-timeout-ms must be between 500 and 30000" }
+        require(maximumHeaderCount in 8..128) { "http.maximum-header-count must be between 8 and 128" }
+        require(maximumHeaderBytes in 1_024..32_768) { "http.maximum-header-bytes must be between 1024 and 32768" }
+        require(maximumHeaderValueBytes in 256..16_384) { "http.maximum-header-value-bytes must be between 256 and 16384" }
+        require(maximumHeaderValueBytes <= maximumHeaderBytes) { "http.maximum-header-value-bytes must not exceed maximum-header-bytes" }
     }
 }
 
@@ -47,10 +55,12 @@ data class RewardSettings(
     val maximumPendingPerPlayer: Int,
     val standard: RewardComponentSettings,
     val premium: RewardComponentSettings,
+    val maximumOnlinePlayerBatch: Int = 500,
 ) {
     init {
         require(pollIntervalSeconds in 1..300) { "reward.poll-interval-seconds must be between 1 and 300" }
         require(maximumPendingPerPlayer in 1..64) { "reward.maximum-pending-per-player must be between 1 and 64" }
+        require(maximumOnlinePlayerBatch in 1..1_000) { "reward.maximum-online-player-batch must be between 1 and 1000" }
         require(!enabled || standard.enabled || premium.enabled) { "At least one vote reward component must be enabled" }
     }
 
@@ -135,11 +145,43 @@ data class GameMonitoringSettings(
     val expectedEntityType: String,
     val expectedEntityId: String,
     val network: NetworkSourcePolicy,
+    val connectTimeoutMs: Long = 3_000,
+    val requestTimeoutMs: Long = 4_000,
+    val maximumResponseBytes: Int = 32_768,
+    val apiBaseUrl: URI = URI("https://api.gamemonitoring.ru/votes/"),
 ) {
     init {
         require(!enabled || webhookToken != null) { "Enabled GameMonitoring adapter requires a webhook token" }
         require(expectedEntityType in setOf("server", "project")) { "GameMonitoring entity type must be server or project" }
         require(expectedEntityId.matches(Regex("[0-9]{1,20}"))) { "GameMonitoring entity id must be numeric" }
+        require(connectTimeoutMs in 250..30_000) { "GameMonitoring connect-timeout-ms must be between 250 and 30000" }
+        require(requestTimeoutMs in 500..60_000 && requestTimeoutMs >= connectTimeoutMs) {
+            "GameMonitoring request-timeout-ms must be between 500 and 60000 and at least connect timeout"
+        }
+        require(maximumResponseBytes in 1_024..262_144) { "GameMonitoring maximum-response-bytes must be between 1024 and 262144" }
+        require(
+            apiBaseUrl.scheme.equals("https", ignoreCase = true) &&
+                apiBaseUrl.host.equals("api.gamemonitoring.ru", ignoreCase = true) &&
+                apiBaseUrl.port in setOf(-1, 443) &&
+                apiBaseUrl.rawUserInfo == null &&
+                apiBaseUrl.rawQuery == null &&
+                apiBaseUrl.rawFragment == null &&
+                apiBaseUrl.path.startsWith('/') &&
+                apiBaseUrl.path.endsWith("/votes/"),
+        ) {
+            "GameMonitoring api-base-url must be a clean HTTPS api.gamemonitoring.ru URL ending /votes/"
+        }
+    }
+}
+
+data class StatusSettings(
+    val voteDayZone: ZoneId = ZoneId.of("Europe/Moscow"),
+    val cacheTtlSeconds: Long = 30,
+    val maximumCacheEntries: Int = 2_048,
+) {
+    init {
+        require(cacheTtlSeconds in 1..300) { "status.cache-ttl-seconds must be between 1 and 300" }
+        require(maximumCacheEntries in 128..10_000) { "status.maximum-cache-entries must be between 128 and 10000" }
     }
 }
 
@@ -154,6 +196,7 @@ data class ArcVotesSettings(
     val hotMc: SignedFormSourceSettings,
     val monitoringMinecraft: MonitoringMinecraftSettings,
     val gameMonitoring: GameMonitoringSettings,
+    val status: StatusSettings = StatusSettings(),
 ) {
     val enabledSources: Set<MonitoringSource> = buildSet {
         if (minecraftRating.enabled) add(MonitoringSource.MINECRAFT_RATING)
@@ -182,7 +225,17 @@ data class ArcVotesSettings(
             dataRoot: Path,
             environment: (String) -> String? = System::getenv,
         ): ArcVotesSettings {
-            val config = ConfigManager.of(dataRoot, "config.yml")
+            return loadFromConfig(dataRoot, ConfigManager.of(dataRoot, "config.yml"), environment)
+        }
+
+        fun loadFresh(dataRoot: Path, environment: (String) -> String? = System::getenv): ArcVotesSettings =
+            loadFromConfig(dataRoot, Config(dataRoot, "config.yml"), environment)
+
+        private fun loadFromConfig(
+            dataRoot: Path,
+            config: Config,
+            environment: (String) -> String?,
+        ): ArcVotesSettings {
             val secrets = SecretResolver(dataRoot, environment)
             val mysqlEnabled = config.boolean("mysql.enabled")
             return ArcVotesSettings(
@@ -198,6 +251,9 @@ data class ArcVotesSettings(
                     maximumBodyBytes = config.int("http.maximum-body-bytes"),
                     persistenceTimeoutMs = config.long("http.persistence-timeout-ms"),
                     trustSingleForwardedClientIp = config.boolean("http.trust-single-forwarded-client-ip"),
+                    maximumHeaderCount = config.int("http.maximum-header-count", 32),
+                    maximumHeaderBytes = config.int("http.maximum-header-bytes", 8192),
+                    maximumHeaderValueBytes = config.int("http.maximum-header-value-bytes", 4096),
                 ),
                 sql = if (mysqlEnabled) loadSql(config, secrets) else null,
                 reward = RewardSettings(
@@ -217,6 +273,12 @@ data class ArcVotesSettings(
                         amount = config.string("reward.premium.amount").trim().toBigDecimal(),
                         currencyId = config.string("reward.premium.currency-id").trim(),
                     ),
+                    maximumOnlinePlayerBatch = config.int("reward.maximum-online-player-batch", 500),
+                ),
+                status = StatusSettings(
+                    voteDayZone = ZoneId.of(config.string("status.vote-day-zone", "Europe/Moscow").trim()),
+                    cacheTtlSeconds = config.long("status.cache-ttl-seconds", 30),
+                    maximumCacheEntries = config.int("status.maximum-cache-entries", 2048),
                 ),
                 minecraftRating = loadSignedForm(config, secrets, MonitoringSource.MINECRAFT_RATING),
                 hotMc = loadSignedForm(config, secrets, MonitoringSource.HOTMC),
@@ -280,6 +342,10 @@ data class ArcVotesSettings(
                 webhookToken = if (enabled) secrets.require(environmentName(config.string("$prefix.webhook-token-env"))) else null,
                 expectedEntityType = config.string("$prefix.expected-entity-type").trim().lowercase(Locale.ROOT),
                 expectedEntityId = config.string("$prefix.expected-entity-id").trim(),
+                connectTimeoutMs = config.long("$prefix.connect-timeout-ms", 3_000),
+                requestTimeoutMs = config.long("$prefix.request-timeout-ms", 4_000),
+                maximumResponseBytes = config.int("$prefix.maximum-response-bytes", 32_768),
+                apiBaseUrl = URI(config.string("$prefix.api-base-url", "https://api.gamemonitoring.ru/votes/").trim()),
                 network = networkPolicy(config, prefix),
             )
         }

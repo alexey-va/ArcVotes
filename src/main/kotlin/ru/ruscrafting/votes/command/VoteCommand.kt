@@ -13,20 +13,14 @@ import org.bukkit.entity.Player
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.whenCompleteSync
 import ru.arc.network.NetworkPlayerName
-import ru.ruscrafting.votes.callback.VoteIngressService
-import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.MonitoringSource
-import ru.ruscrafting.votes.status.VoteDailyStatusService
-import ru.ruscrafting.votes.text.VoteLocale
+import ru.ruscrafting.votes.live.VoteLiveConfiguration
 import java.util.logging.Level
 import java.util.logging.Logger
 
 class VoteCommand(
-    private val settings: ArcVotesSettings,
-    private val locale: VoteLocale,
-    private val ingress: VoteIngressService?,
+    private val live: () -> VoteLiveConfiguration,
     private val tasks: LifecycleTaskScope,
-    private val dailyStatus: VoteDailyStatusService?,
     private val logger: Logger,
 ) : CommandExecutor, TabCompleter {
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
@@ -35,25 +29,35 @@ class VoteCommand(
             return true
         }
         if (args.size == 1 && args[0].equals("status", ignoreCase = true)) {
+            val runtime = live()
             if (!sender.hasPermission("arcvotes.admin.status")) {
-                sender.sendMessage(locale.render("commands.no-permission", sender))
+                sender.sendMessage(runtime.locale.render("commands.no-permission", sender))
                 return true
             }
             val values = mapOf(
-                "http" to state(sender, settings.http.enabled),
-                "mysql" to state(sender, settings.sql != null),
-                "reward" to state(sender, settings.reward.enabled),
-                "minecraft_rating_status" to state(sender, MonitoringSource.MINECRAFT_RATING in settings.enabledSources),
-                "hotmc_status" to state(sender, MonitoringSource.HOTMC in settings.enabledSources),
-                "monitoring_minecraft_status" to state(
+                "http" to state(runtime, sender, runtime.settings.http.enabled),
+                "mysql" to state(runtime, sender, runtime.settings.sql != null),
+                "reward" to state(runtime, sender, runtime.settings.reward.enabled),
+                "minecraft_rating_status" to state(
+                    runtime,
                     sender,
-                    MonitoringSource.MONITORING_MINECRAFT in settings.enabledSources,
+                    MonitoringSource.MINECRAFT_RATING in runtime.settings.enabledSources,
                 ),
-                "game_monitoring_status" to state(sender, MonitoringSource.GAME_MONITORING in settings.enabledSources),
+                "hotmc_status" to state(runtime, sender, MonitoringSource.HOTMC in runtime.settings.enabledSources),
+                "monitoring_minecraft_status" to state(
+                    runtime,
+                    sender,
+                    MonitoringSource.MONITORING_MINECRAFT in runtime.settings.enabledSources,
+                ),
+                "game_monitoring_status" to state(
+                    runtime,
+                    sender,
+                    MonitoringSource.GAME_MONITORING in runtime.settings.enabledSources,
+                ),
             )
-            locale.renderLines("commands.status", sender, values).forEach(sender::sendMessage)
-            ingress?.snapshot()?.let { snapshot ->
-                locale.renderLines(
+            runtime.locale.renderLines("commands.status", sender, values).forEach(sender::sendMessage)
+            runtime.ingress?.snapshot()?.let { snapshot ->
+                runtime.locale.renderLines(
                     "commands.counters",
                     sender,
                     mapOf(
@@ -66,7 +70,7 @@ class VoteCommand(
             }
             return true
         }
-        sender.sendMessage(locale.render("commands.help", sender))
+        sender.sendMessage(live().locale.render("commands.help", sender))
         return true
     }
 
@@ -79,19 +83,30 @@ class VoteCommand(
         "status".startsWith(args[0], ignoreCase = true)
     ) listOf("status") else emptyList()
 
-    private fun link(source: MonitoringSource, sender: CommandSender, label: String, url: String): Component =
-        locale.site(source, sender, label)
+    private fun link(
+        runtime: VoteLiveConfiguration,
+        source: MonitoringSource,
+        sender: CommandSender,
+        label: String,
+        url: String,
+    ): Component = runtime.locale.site(source, sender, label)
         .decorate(TextDecoration.UNDERLINED)
         .clickEvent(ClickEvent.openUrl(url))
         .hoverEvent(
             HoverEvent.showText(
-                locale.render("commands.open-hint", sender, mapOf("site" to locale.site(source, sender, label))),
+                runtime.locale.render(
+                    "commands.open-hint",
+                    sender,
+                    mapOf("site" to runtime.locale.site(source, sender, label)),
+                ),
             ),
         )
 
     private fun showVoteList(sender: CommandSender) {
+        val runtime = live()
+        val dailyStatus = runtime.dailyStatus
         if (sender !is Player || dailyStatus == null) {
-            renderVoteList(sender, emptySet())
+            renderVoteList(sender, emptySet(), runtime)
             return
         }
         dailyStatus.find(NetworkPlayerName.of(sender.name))
@@ -99,37 +114,47 @@ class VoteCommand(
                 if (!sender.isOnline) return@whenCompleteSync
                 if (failure != null) {
                     logger.log(Level.WARNING, "Could not load today's vote status for /vote", failure)
-                    renderVoteList(sender, emptySet())
+                    renderVoteList(sender, emptySet(), runtime)
                 } else {
-                    renderVoteList(sender, votedSources.orEmpty())
+                    renderVoteList(sender, votedSources.orEmpty(), runtime)
                 }
             }
     }
 
-    private fun renderVoteList(sender: CommandSender, votedSources: Set<MonitoringSource>) {
-        val links = settings.presentations.mapValues { (source, presentation) ->
-            link(source, sender, presentation.displayName, presentation.voteUrl.toASCIIString())
+    private fun renderVoteList(
+        sender: CommandSender,
+        votedSources: Set<MonitoringSource>,
+        runtime: VoteLiveConfiguration,
+    ) {
+        val links = runtime.settings.presentations.mapValues { (source, presentation) ->
+            link(runtime, source, sender, presentation.displayName, presentation.voteUrl.toASCIIString())
         }
         val values = mapOf(
             "minecraft_rating" to links.getValue(MonitoringSource.MINECRAFT_RATING),
-            "minecraft_rating_state" to voteState(sender, MonitoringSource.MINECRAFT_RATING in votedSources),
+            "minecraft_rating_state" to voteState(runtime, sender, MonitoringSource.MINECRAFT_RATING in votedSources),
             "hotmc" to links.getValue(MonitoringSource.HOTMC),
-            "hotmc_state" to voteState(sender, MonitoringSource.HOTMC in votedSources),
+            "hotmc_state" to voteState(runtime, sender, MonitoringSource.HOTMC in votedSources),
             "monitoring_minecraft" to links.getValue(MonitoringSource.MONITORING_MINECRAFT),
-            "monitoring_minecraft_state" to voteState(sender, MonitoringSource.MONITORING_MINECRAFT in votedSources),
+            "monitoring_minecraft_state" to voteState(
+                runtime,
+                sender,
+                MonitoringSource.MONITORING_MINECRAFT in votedSources,
+            ),
             "game_monitoring" to links.getValue(MonitoringSource.GAME_MONITORING),
-            "game_monitoring_state" to voteState(sender, MonitoringSource.GAME_MONITORING in votedSources),
+            "game_monitoring_state" to voteState(runtime, sender, MonitoringSource.GAME_MONITORING in votedSources),
         )
-        locale.renderLines("commands.vote-list", sender, values).forEach(sender::sendMessage)
-        if (settings.reward.enabled) sender.sendMessage(locale.render("commands.reward-note", sender))
+        runtime.locale.renderLines("commands.vote-list", sender, values).forEach(sender::sendMessage)
+        if (runtime.settings.reward.enabled) {
+            sender.sendMessage(runtime.locale.render("commands.reward-note", sender))
+        }
     }
 
-    private fun voteState(sender: CommandSender, voted: Boolean): Component = locale.render(
+    private fun voteState(runtime: VoteLiveConfiguration, sender: CommandSender, voted: Boolean): Component = runtime.locale.render(
         if (voted) "commands.vote-state-voted" else "commands.vote-state-open",
         sender,
     )
 
-    private fun state(sender: CommandSender, enabled: Boolean): Component = locale.render(
+    private fun state(runtime: VoteLiveConfiguration, sender: CommandSender, enabled: Boolean): Component = runtime.locale.render(
         if (enabled) "commands.state-enabled" else "commands.state-disabled",
         sender,
     )

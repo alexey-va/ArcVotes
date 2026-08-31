@@ -9,6 +9,7 @@ import ru.ruscrafting.votes.domain.VoteRewardComponent
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 enum class RewardDepositResult {
     APPLIED,
@@ -28,17 +29,31 @@ fun interface VoteRewardDepositor {
 
 class VaultRedisEconomyRewardDepositor private constructor(
     private val vault: Economy?,
-    private val redisCurrencies: Map<String, RedisCurrencyHandle>,
+    private val redisEconomyClassLoader: ClassLoader?,
+    redisCurrencies: Map<String, RedisCurrencyHandle>,
 ) : VoteRewardDepositor {
+    private val redisCurrencies = ConcurrentHashMap(redisCurrencies)
+
     override fun deposit(player: Player, component: VoteRewardComponent): RewardDepositResult {
         val response = when (component.provider) {
             RewardProvider.VAULT -> requireNotNull(vault) { "Vault economy service is unavailable" }
                 .depositPlayer(player, component.amount.toDouble())
-            RewardProvider.REDIS_ECONOMY -> requireNotNull(redisCurrencies[component.currencyId]) {
-                "Configured RedisEconomy currency is unavailable"
-            }.deposit(player.uniqueId, player.name, component.amount.toDouble())
+            RewardProvider.REDIS_ECONOMY -> redisCurrency(requireNotNull(component.currencyId))
+                .deposit(player.uniqueId, player.name, component.amount.toDouble())
         }
         return if (response.transactionSuccess()) RewardDepositResult.APPLIED else RewardDepositResult.REJECTED
+    }
+
+    /**
+     * Pending rows retain the currency used when the vote was accepted. Resolve
+     * historical ids lazily so changing the configured premium currency does
+     * not strand already durable rewards after a hot reload.
+     */
+    private fun redisCurrency(currencyId: String): RedisCurrencyHandle = redisCurrencies.computeIfAbsent(currencyId) {
+        RedisEconomyBridge.open(
+            requireNotNull(redisEconomyClassLoader) { "RedisEconomy API is unavailable" },
+            setOf(currencyId),
+        ).getValue(currencyId)
     }
 
     companion object {
@@ -58,7 +73,7 @@ class VaultRedisEconomyRewardDepositor private constructor(
                 requireNotNull(redisEconomyClassLoader) { "RedisEconomy API is required for premium vote rewards" },
                 currencyIds,
             )
-            return VaultRedisEconomyRewardDepositor(vault, currencies)
+            return VaultRedisEconomyRewardDepositor(vault, redisEconomyClassLoader, currencies)
         }
 
     }

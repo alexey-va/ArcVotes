@@ -35,6 +35,7 @@ placeholders:
   game_monitoring: '<#b784ff><underlined>GameMonitoring</underlined></color>'
   game_monitoring_state: '<#ffc98c>◇</color>'
   site: '<#ff5f56>HotMC</color>'
+  fields: ': http.port'
   amount: '1000'
   rewards: '<#4de3a2>+1000</color> <white>💰</white> <#ffc98c>·</color> <#ffd166>+3</color> <white></white>'
   http: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'

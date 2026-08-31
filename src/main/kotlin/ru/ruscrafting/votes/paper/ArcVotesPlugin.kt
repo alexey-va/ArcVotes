@@ -18,17 +18,24 @@ import ru.arc.paper.runtime.PaperPluginRuntime
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.onetime.MySqlOneTimeUseLedger
 import ru.arc.sql.onetime.MySqlOneTimeUsePartition
-import ru.ruscrafting.votes.callback.ArcVoteHttpServer
+import ru.ruscrafting.votes.callback.VoteIngressCounters
 import ru.ruscrafting.votes.callback.VoteIngressService
+import ru.ruscrafting.votes.command.ArcVotesAdminCommand
 import ru.ruscrafting.votes.command.VoteCommand
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.domain.RewardProvider
+import ru.ruscrafting.votes.live.VoteLiveConfiguration
+import ru.ruscrafting.votes.live.VoteLiveState
+import ru.ruscrafting.votes.reload.ArcVotesReloadController
+import ru.ruscrafting.votes.reload.VoteRewardRuntime
+import ru.ruscrafting.votes.reload.VoteRewardRuntimeFactory
 import ru.ruscrafting.votes.reward.VoteRewardService
 import ru.ruscrafting.votes.reward.VaultRedisEconomyRewardDepositor
 import ru.ruscrafting.votes.storage.MySqlVoteRepository
 import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
@@ -37,9 +44,6 @@ class ArcVotesPlugin : JavaPlugin() {
     private var lifecycle: PaperPluginRuntime? = null
     private var sqlRuntime: SqlRuntime? = null
     private val sqlReady = AtomicBoolean(false)
-    private val httpReady = AtomicBoolean(false)
-    private val vaultReady = AtomicBoolean(false)
-    private val redisEconomyReady = AtomicBoolean(false)
     private val debug = StructuredDebugLine("ARCVOTES_EVENT")
 
     override fun onEnable() {
@@ -64,26 +68,29 @@ class ArcVotesPlugin : JavaPlugin() {
                     sqlReady.set(true)
                 }
             }
-            val dailyStatus = repository?.let(::VoteDailyStatusService)
-
-            val rewardService = if (settings.reward.enabled) {
-                val storage = requireNotNull(repository) { "Vote reward storage is unavailable" }
-                val reward = requireNotNull(settings.reward.bundle)
-                val requiresVault = reward.components.any { it.provider == RewardProvider.VAULT }
-                val economy = server.servicesManager.getRegistration(Economy::class.java)?.provider
-                require(!requiresVault || economy != null) { "Vault economy service is required for standard vote rewards" }
-                vaultReady.set(true)
-                val redisEconomyClassLoader = if (reward.components.any { it.provider == RewardProvider.REDIS_ECONOMY }) {
-                    requireNotNull(server.pluginManager.getPlugin("RedisEconomy")) {
-                        "RedisEconomy plugin is required for premium vote rewards"
-                    }.javaClass.classLoader
-                } else null
-                val depositor = VaultRedisEconomyRewardDepositor.create(
-                    vault = economy,
-                    redisEconomyClassLoader = redisEconomyClassLoader,
-                    reward = reward,
+            val dailyStatus = repository?.let {
+                VoteDailyStatusService(
+                    history = it,
+                    cacheTtl = Duration.ofSeconds(settings.status.cacheTtlSeconds),
+                    voteDayZone = settings.status.voteDayZone,
+                    maximumCacheEntries = settings.status.maximumCacheEntries,
                 )
-                redisEconomyReady.set(true)
+            }
+            val rewardRuntimeFactory = VoteRewardRuntimeFactory(::createRewardRuntime)
+            val rewardRuntime = rewardRuntimeFactory.create(settings)
+            val live = VoteLiveState(
+                VoteLiveConfiguration(
+                    settings = settings,
+                    locale = locale,
+                    dailyStatus = dailyStatus,
+                    ingress = null,
+                    rewardDepositor = rewardRuntime.depositor,
+                    vaultReady = rewardRuntime.vaultReady,
+                    redisEconomyReady = rewardRuntime.redisEconomyReady,
+                ),
+            )
+
+            val rewardService = repository?.let { storage ->
                 val sql = requireNotNull(sqlRuntime)
                 val ledger = runtime.own(
                     MySqlOneTimeUseLedger.attach(
@@ -92,27 +99,57 @@ class ArcVotesPlugin : JavaPlugin() {
                         partition = MySqlOneTimeUsePartition("vote_reward"),
                     ),
                 )
-                VoteRewardService(server, runtime.tasks, storage, ledger, depositor, settings, locale, logger, dailyStatus).also {
+                runtime.own(
+                    VoteRewardService(
+                        server = server,
+                        tasks = runtime.tasks,
+                        repository = storage,
+                        ledger = ledger,
+                        live = live::current,
+                        logger = logger,
+                    ),
+                ).also {
                     server.pluginManager.registerEvents(it, this)
                     it.start()
                 }
-            } else null
+            }
 
-            val ingress = if (settings.http.enabled) {
-                val storage = requireNotNull(repository) { "Callback storage is unavailable" }
-                VoteIngressService(settings, storage, logger) { event -> rewardService?.onDurableEvent(event) }.also { service ->
-                    val http = runtime.own(ArcVoteHttpServer(settings.http, service, logger))
-                    http.start()
-                    httpReady.set(true)
-                }
-            } else null
+            val ingressCounters = VoteIngressCounters()
+            val ingress = repository?.let { storage ->
+                VoteIngressService(
+                    settings = settings,
+                    repository = storage,
+                    logger = logger,
+                    onDurableEvent = { event -> rewardService?.onDurableEvent(event) },
+                    counters = ingressCounters,
+                )
+            }
+            live.publish(live.current().copy(ingress = ingress))
 
-            val voteCommand = VoteCommand(settings, locale, ingress, runtime.tasks, dailyStatus, logger)
+            val reloadController = runtime.own(
+                ArcVotesReloadController(
+                    dataRoot = dataPath,
+                    live = live,
+                    repository = repository,
+                    history = repository,
+                    rewardService = rewardService,
+                    rewardRuntimeFactory = rewardRuntimeFactory,
+                    logger = logger,
+                    ingressCounters = ingressCounters,
+                ),
+            ).also(ArcVotesReloadController::startInitialHttp)
+
+            val voteCommand = VoteCommand(live::current, runtime.tasks, logger)
             requireNotNull(getCommand("vote")).apply {
                 setExecutor(voteCommand)
                 tabCompleter = voteCommand
             }
-            installHealth(runtime, settings)
+            val adminCommand = ArcVotesAdminCommand(live::current, reloadController)
+            requireNotNull(getCommand("arcvotes")).apply {
+                setExecutor(adminCommand)
+                tabCompleter = adminCommand
+            }
+            installHealth(runtime, live, reloadController)
             runtime.ready(
                 "server" to settings.serverId,
                 "http" to settings.http.enabled,
@@ -143,19 +180,22 @@ class ArcVotesPlugin : JavaPlugin() {
         lifecycle = null
         sqlRuntime = null
         sqlReady.set(false)
-        httpReady.set(false)
-        vaultReady.set(false)
-        redisEconomyReady.set(false)
         ConfigManager.clear()
         Tasks.reset()
     }
 
-    private fun installHealth(runtime: PaperPluginRuntime, settings: ArcVotesSettings) {
+    private fun installHealth(
+        runtime: PaperPluginRuntime,
+        live: VoteLiveState,
+        reloadController: ArcVotesReloadController,
+    ) {
         runtime.registerHealth("votes") {
+            val current = live.current()
+            val settings = current.settings
             val mysql = settings.sql == null || sqlReady.get()
-            val http = !settings.http.enabled || httpReady.get()
-            val vault = !settings.reward.enabled || vaultReady.get()
-            val redisEconomy = !settings.reward.enabled || redisEconomyReady.get()
+            val http = !settings.http.enabled || reloadController.isHttpReady()
+            val vault = !settings.reward.enabled || current.vaultReady
+            val redisEconomy = !settings.reward.enabled || current.redisEconomyReady
             RuntimeHealthContribution(
                 state = if (mysql && http && vault && redisEconomy) RuntimeHealthState.UP else RuntimeHealthState.DOWN,
                 schemas = mapOf("votes" to 3),
@@ -167,6 +207,28 @@ class ArcVotesPlugin : JavaPlugin() {
                 ),
             )
         }
+    }
+
+    private fun createRewardRuntime(settings: ArcVotesSettings): VoteRewardRuntime {
+        if (!settings.reward.enabled) return VoteRewardRuntime(null, vaultReady = true, redisEconomyReady = true)
+        val reward = requireNotNull(settings.reward.bundle)
+        val requiresVault = reward.components.any { it.provider == RewardProvider.VAULT }
+        val requiresRedisEconomy = reward.components.any { it.provider == RewardProvider.REDIS_ECONOMY }
+        val economy = server.servicesManager.getRegistration(Economy::class.java)?.provider
+        require(!requiresVault || economy != null) { "Vault economy service is required for standard vote rewards" }
+        val redisEconomyClassLoader = server.pluginManager.getPlugin("RedisEconomy")?.javaClass?.classLoader
+        require(!requiresRedisEconomy || redisEconomyClassLoader != null) {
+            "RedisEconomy plugin is required for premium vote rewards"
+        }
+        return VoteRewardRuntime(
+            depositor = VaultRedisEconomyRewardDepositor.create(
+                vault = economy,
+                redisEconomyClassLoader = redisEconomyClassLoader,
+                reward = reward,
+            ),
+            vaultReady = !requiresVault || economy != null,
+            redisEconomyReady = !requiresRedisEconomy || redisEconomyClassLoader != null,
+        )
     }
 
     private fun installLogging(settings: ArcVotesSettings) {

@@ -3,6 +3,7 @@ package ru.ruscrafting.votes.text
 import net.kyori.adventure.text.Component
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
+import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import ru.arc.text.ConfigLocaleCatalog
 import ru.arc.text.LocaleRequirements
@@ -10,18 +11,25 @@ import ru.arc.text.LocalizedMiniMessage
 import ru.ruscrafting.votes.config.MonitoringSource
 import java.nio.file.Path
 
-class VoteLocale(
+class VoteLocale private constructor(
     dataRoot: Path,
     private val defaultLocale: () -> String,
     private val useClientLocale: () -> Boolean,
+    config: (String) -> Config,
 ) {
     private val renderer = LocalizedMiniMessage(
         catalogs = mapOf(
-            "ru" to ConfigLocaleCatalog(ConfigManager.of(dataRoot, "lang/ru.yml")),
-            "en" to ConfigLocaleCatalog(ConfigManager.of(dataRoot, "lang/en.yml")),
+            "ru" to ConfigLocaleCatalog(config("lang/ru.yml")),
+            "en" to ConfigLocaleCatalog(config("lang/en.yml")),
         ),
         defaultLocale = defaultLocale,
     )
+
+    constructor(
+        dataRoot: Path,
+        defaultLocale: () -> String,
+        useClientLocale: () -> Boolean,
+    ) : this(dataRoot, defaultLocale, useClientLocale, { path -> ConfigManager.of(dataRoot, path) })
 
     fun render(
         path: String,
@@ -60,6 +68,11 @@ class VoteLocale(
                     "commands.help",
                     "commands.state-enabled",
                     "commands.state-disabled",
+                    "commands.reload-success",
+                    "commands.reload-failed",
+                    "commands.reload-restart-required",
+                    "commands.reload-busy",
+                    "commands.reload-help",
                     "reward.component-standard",
                     "reward.component-premium",
                     "reward.component-separator",
@@ -76,4 +89,13 @@ class VoteLocale(
 
     private fun localeTag(audience: CommandSender?): String =
         if (useClientLocale() && audience is Player) audience.locale().toLanguageTag() else defaultLocale()
+
+    companion object {
+        /** Reads isolated Config instances so a rejected reload cannot mutate the live renderer. */
+        fun fresh(
+            dataRoot: Path,
+            defaultLocale: () -> String,
+            useClientLocale: () -> Boolean,
+        ): VoteLocale = VoteLocale(dataRoot, defaultLocale, useClientLocale, { path -> Config(dataRoot, path) })
+    }
 }

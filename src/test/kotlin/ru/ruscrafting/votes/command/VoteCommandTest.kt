@@ -16,6 +16,8 @@ import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.TestTaskScheduler
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.MonitoringSource
+import ru.ruscrafting.votes.live.VoteLiveConfiguration
+import ru.ruscrafting.votes.live.VoteLiveState
 import ru.ruscrafting.votes.storage.VoteHistoryLookup
 import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
@@ -39,7 +41,8 @@ class VoteCommandTest : StringSpec({
         every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
         val tasks = LifecycleTaskScope(TestTaskScheduler())
 
-        val vote = VoteCommand(settings, locale, null, tasks, null, Logger.getAnonymousLogger())
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
+        val vote = VoteCommand(live::current, tasks, Logger.getAnonymousLogger())
         vote.onCommand(sender, command, "vote", emptyArray()) shouldBe true
 
         messages shouldHaveSize 7
@@ -89,14 +92,8 @@ class VoteCommandTest : StringSpec({
             history,
             Clock.fixed(Instant.parse("2026-08-31T12:00:00Z"), ZoneOffset.UTC),
         )
-        val vote = VoteCommand(
-            settings,
-            locale,
-            null,
-            LifecycleTaskScope(scheduler),
-            dailyStatus,
-            Logger.getAnonymousLogger(),
-        )
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, dailyStatus, null, null, false, false))
+        val vote = VoteCommand(live::current, LifecycleTaskScope(scheduler), Logger.getAnonymousLogger())
 
         vote.onCommand(player, command, "vote", emptyArray()) shouldBe true
         messages shouldHaveSize 0
@@ -108,6 +105,46 @@ class VoteCommandTest : StringSpec({
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.count { it == '✔' } shouldBe 2
         plain.count { it == '◇' } shouldBe 2
+    }
+
+    "an in-flight vote command renders one captured configuration generation" {
+        val root = Files.createTempDirectory("arcvotes-command-generation")
+        val settings = ArcVotesSettings.load(root) { null }
+        val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
+        val player = mockk<Player>(relaxed = true)
+        val command = mockk<Command>(relaxed = true)
+        val messages = mutableListOf<Component>()
+        every { player.name } returns "Steve"
+        every { player.isOnline } returns true
+        every { player.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        val status = CompletableFuture<Set<MonitoringSource>>()
+        val dailyStatus = VoteDailyStatusService(VoteHistoryLookup { _, _, _ -> status })
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, dailyStatus, null, null, false, false))
+        val scheduler = TestTaskScheduler()
+        val vote = VoteCommand(live::current, LifecycleTaskScope(scheduler), Logger.getAnonymousLogger())
+
+        vote.onCommand(player, command, "vote", emptyArray()) shouldBe true
+        live.publish(
+            live.current().copy(
+                settings = settings.copy(
+                    hotMc = settings.hotMc.copy(
+                        presentation = settings.hotMc.presentation.copy(
+                            voteUrl = java.net.URI("https://hotmc.ru/servers/reloaded"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        status.complete(emptySet())
+        scheduler.executeImmediate()
+
+        messages shouldHaveSize 7
+        messages
+            .flatMap(Component::descendantsAndSelf)
+            .mapNotNull(Component::clickEvent)
+            .toSet() shouldBe settings.presentations.values
+            .map { ClickEvent.openUrl(it.voteUrl.toASCIIString()) }
+            .toSet()
     }
 })
 

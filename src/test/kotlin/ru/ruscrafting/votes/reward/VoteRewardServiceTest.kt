@@ -19,10 +19,13 @@ import ru.arc.onetime.OneTimeUseClaimResult
 import ru.arc.onetime.OneTimeUseCommitResult
 import ru.arc.onetime.OneTimeUseLedger
 import ru.arc.onetime.OneTimeUseReleaseResult
+import ru.arc.onetime.OneTimeUseScope
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.MonitoringSource
 import ru.ruscrafting.votes.config.RewardComponentSettings
 import ru.ruscrafting.votes.config.RewardSettings
+import ru.ruscrafting.votes.live.VoteLiveConfiguration
+import ru.ruscrafting.votes.live.VoteLiveState
 import ru.ruscrafting.votes.domain.AuthenticatedVote
 import ru.ruscrafting.votes.domain.RewardProvider
 import ru.ruscrafting.votes.domain.RewardState
@@ -49,10 +52,11 @@ class VoteRewardServiceTest : FreeSpec({
         val event = voteEvent("OnlineSteve")
         val repository = RecordingRepository(pending = listOf(event))
         val deposited = mutableListOf<String>()
+        var nano = 0L
         val service = service(server, scheduler, repository, RecordingLedger(), VoteRewardDepositor { _, component ->
             deposited += component.key
             RewardDepositResult.APPLIED
-        })
+        }, nanoTime = { nano })
 
         service.start()
         repository.polledNames.single().map { it.value } shouldContainExactly listOf("OnlineSteve")
@@ -60,6 +64,7 @@ class VoteRewardServiceTest : FreeSpec({
         deposited shouldContainExactly listOf("standard", "premium")
         repository.granted shouldContainExactly listOf(event.id)
 
+        nano = 5_000_000_000L
         scheduler.advanceMs(5_000)
         repository.polledNames.size shouldBe 2
         repository.singlePlayerLookups shouldBe 0
@@ -136,31 +141,144 @@ class VoteRewardServiceTest : FreeSpec({
             component.color()?.value() == 0xFF5F56 && plain.serialize(component).contains("HotMC")
         } shouldBe true
     }
+
+    "an in-flight event finishes with the generation captured before reload" {
+        val scheduler = TestTaskScheduler()
+        val player = player("Steve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val event = voteEvent()
+        val repository = RecordingRepository(pending = listOf(event))
+        val ledger = DelayedFirstClaimLedger()
+        val oldDeposits = mutableListOf<String>()
+        val newDeposits = mutableListOf<String>()
+        val settings = testSettings()
+        val locale = mockk<VoteLocale>(relaxed = true)
+        val live = VoteLiveState(
+            VoteLiveConfiguration(
+                settings = settings,
+                locale = locale,
+                dailyStatus = null,
+                ingress = null,
+                rewardDepositor = VoteRewardDepositor { _, component ->
+                    oldDeposits += component.key
+                    RewardDepositResult.APPLIED
+                },
+                vaultReady = true,
+                redisEconomyReady = true,
+            ),
+        )
+        val service = VoteRewardService(
+            server = server,
+            tasks = LifecycleTaskScope(scheduler),
+            repository = repository,
+            ledger = ledger,
+            live = live::current,
+            logger = Logger.getAnonymousLogger().apply { level = Level.OFF },
+            pollTasks = LifecycleTaskScope(scheduler),
+        )
+
+        service.deliverPending(player)
+        scheduler.executeImmediate()
+        ledger.claimed.size shouldBe 1
+        live.publish(
+            live.current().copy(
+                rewardDepositor = VoteRewardDepositor { _, component ->
+                    newDeposits += component.key
+                    RewardDepositResult.APPLIED
+                },
+            ),
+        )
+        ledger.completeFirst()
+        repeat(16) { scheduler.executeImmediate() }
+
+        oldDeposits shouldContainExactly listOf("standard", "premium")
+        newDeposits shouldBe emptyList()
+        repository.granted shouldContainExactly listOf(event.id)
+    }
+
+    "a claim recovered after restart on the same backend is quarantined instead of repeated" {
+        val scheduler = TestTaskScheduler()
+        val player = player("Steve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val event = voteEvent()
+        val repository = RecordingRepository(pending = listOf(event))
+        val requests = mutableListOf<OneTimeUseClaimRequest>()
+        val ledger = object : OneTimeUseLedger {
+            override fun claim(request: OneTimeUseClaimRequest): CompletableFuture<OneTimeUseClaimResult> {
+                requests += request
+                val result = if (request.scope == OneTimeUseScope.parse("spawn")) {
+                    OneTimeUseClaimResult.Acquired(OneTimeUseClaim.acquired(request, newlyCreated = false))
+                } else {
+                    OneTimeUseClaimResult.Busy
+                }
+                return CompletableFuture.completedFuture(result)
+            }
+
+            override fun abandon(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseAbandonResult> =
+                CompletableFuture.completedFuture(OneTimeUseAbandonResult.RETAINED_FOR_RECOVERY)
+
+            override fun commit(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseCommitResult> =
+                CompletableFuture.failedFuture(AssertionError("recovered claim must not be committed"))
+
+            override fun release(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseReleaseResult> =
+                CompletableFuture.failedFuture(AssertionError("recovered claim must not be released"))
+        }
+        val service = service(server, scheduler, repository, ledger, VoteRewardDepositor { _, _ ->
+            throw AssertionError("recovered claim must not repeat the reward effect")
+        })
+
+        service.deliverPending(player)
+        repeat(12) { scheduler.executeImmediate() }
+
+        requests.single().scope shouldBe OneTimeUseScope.parse("spawn")
+        repository.recoveries shouldContainExactly listOf(Triple(event.id, player.uniqueId, "claim_recovered"))
+        repository.granted shouldBe emptyList()
+    }
+
 })
 
 private fun service(
     server: Server,
     scheduler: TestTaskScheduler,
     repository: RecordingRepository,
-    ledger: RecordingLedger,
+    ledger: OneTimeUseLedger,
     depositor: VoteRewardDepositor,
     locale: VoteLocale = mockk(relaxed = true),
+    nanoTime: () -> Long = System::nanoTime,
 ): VoteRewardService {
-    val settings = mockk<ArcVotesSettings>()
-    every { settings.serverId } returns "spawn"
-    every { settings.reward } returns rewardSettings()
-    val root = java.nio.file.Files.createTempDirectory("arcvotes-reward-settings")
-    every { settings.presentations } returns ArcVotesSettings.load(root) { null }.presentations
+    val settings = testSettings()
+    val live = VoteLiveState(
+        VoteLiveConfiguration(
+            settings = settings,
+            locale = locale,
+            dailyStatus = null,
+            ingress = null,
+            rewardDepositor = depositor,
+            vaultReady = true,
+            redisEconomyReady = true,
+        ),
+    )
     return VoteRewardService(
         server = server,
         tasks = LifecycleTaskScope(scheduler),
         repository = repository,
         ledger = ledger,
-        depositor = depositor,
-        settings = settings,
-        locale = locale,
+        live = live::current,
         logger = Logger.getAnonymousLogger().apply { level = Level.OFF },
+        pollTasks = LifecycleTaskScope(scheduler),
+        nanoTime = nanoTime,
     )
+}
+
+private fun testSettings(): ArcVotesSettings {
+    val settings = mockk<ArcVotesSettings>()
+    every { settings.serverId } returns "spawn"
+    every { settings.reward } returns rewardSettings()
+    val root = java.nio.file.Files.createTempDirectory("arcvotes-reward-settings")
+    every { settings.presentations } returns ArcVotesSettings.load(root) { null }.presentations
+    return settings
 }
 
 private fun rewardSettings(): RewardSettings = RewardSettings(
@@ -207,6 +325,7 @@ private class RecordingRepository(
 ) : VoteRepository {
     val polledNames = mutableListOf<Set<NetworkPlayerName>>()
     val granted = mutableListOf<UUID>()
+    val recoveries = mutableListOf<Triple<UUID, UUID?, String>>()
     var singlePlayerLookups = 0
 
     override fun initialize(): CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
@@ -237,8 +356,10 @@ private class RecordingRepository(
         return CompletableFuture.completedFuture(markGrantedResult)
     }
 
-    override fun markRecovery(eventId: UUID, playerId: UUID?, failureCode: String): CompletableFuture<Boolean> =
-        CompletableFuture.completedFuture(true)
+    override fun markRecovery(eventId: UUID, playerId: UUID?, failureCode: String): CompletableFuture<Boolean> {
+        recoveries += Triple(eventId, playerId, failureCode)
+        return CompletableFuture.completedFuture(true)
+    }
 }
 
 private fun Component.descendantsAndSelf(): List<Component> =
@@ -264,6 +385,33 @@ private class RecordingLedger(
         committed += claim
         return CompletableFuture.completedFuture(OneTimeUseCommitResult.COMMITTED)
     }
+
+    override fun release(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseReleaseResult> =
+        CompletableFuture.completedFuture(OneTimeUseReleaseResult.RELEASED)
+
+    override fun abandon(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseAbandonResult> =
+        CompletableFuture.completedFuture(OneTimeUseAbandonResult.RETAINED_FOR_RECOVERY)
+}
+
+private class DelayedFirstClaimLedger : OneTimeUseLedger {
+    val claimed = mutableListOf<OneTimeUseClaimRequest>()
+    private val first = CompletableFuture<OneTimeUseClaimResult>()
+
+    override fun claim(request: OneTimeUseClaimRequest): CompletableFuture<OneTimeUseClaimResult> {
+        claimed += request
+        if (claimed.size == 1) return first
+        return CompletableFuture.completedFuture(
+            OneTimeUseClaimResult.Acquired(OneTimeUseClaim.acquired(request, newlyCreated = true)),
+        )
+    }
+
+    fun completeFirst() {
+        val request = claimed.single()
+        first.complete(OneTimeUseClaimResult.Acquired(OneTimeUseClaim.acquired(request, newlyCreated = true)))
+    }
+
+    override fun commit(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseCommitResult> =
+        CompletableFuture.completedFuture(OneTimeUseCommitResult.COMMITTED)
 
     override fun release(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseReleaseResult> =
         CompletableFuture.completedFuture(OneTimeUseReleaseResult.RELEASED)

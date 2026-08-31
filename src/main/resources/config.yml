@@ -1,5 +1,8 @@
 # ArcVotes starts in link-only mode. Enable MySQL and the callback listener only
 # after the reverse-proxy route and secret environment variables are ready.
+# Apply safe changes with /arcvotes reload. server-id and mysql are restart-only.
+# Active listener bind/port/worker/queue changes require a restart, or a
+# disable+reload followed by edit+enable+reload. Every other field is live.
 server-id: survival
 
 locale:
@@ -11,14 +14,20 @@ http:
   # Feature ingress is intentionally loopback-only. TLS and public routing belong
   # to the managed reverse proxy.
   bind-address: 127.0.0.1
+  # These three capacity/socket fields and bind-address are fixed while an
+  # enabled listener is running. Body/header/timeouts/trust below are live.
   port: 9187
   worker-threads: 2
   queue-capacity: 64
   maximum-body-bytes: 16384
+  maximum-header-count: 32
+  maximum-header-bytes: 8192
+  maximum-header-value-bytes: 4096
   persistence-timeout-ms: 10000
   trust-single-forwarded-client-ip: true
 
 mysql:
+  # The whole MySQL block is restart-only because it owns the durable ledger.
   enabled: false
   host: mysql
   port: 3306
@@ -42,6 +51,7 @@ reward:
   currency-label: монет
   poll-interval-seconds: 5
   maximum-pending-per-player: 16
+  maximum-online-player-batch: 500
   standard:
     enabled: true
     amount: 1000.00
@@ -49,6 +59,11 @@ reward:
     enabled: true
     currency-id: tokens
     amount: 3.00
+
+status:
+  vote-day-zone: Europe/Moscow
+  cache-ttl-seconds: 30
+  maximum-cache-entries: 2048
 
 monitorings:
   minecraft-rating:
@@ -94,5 +109,9 @@ monitorings:
     expected-entity-type: server
     # Current server/API entity id from the owner page.
     expected-entity-id: '14210383'
+    connect-timeout-ms: 3000
+    request-timeout-ms: 4000
+    maximum-response-bytes: 32768
+    api-base-url: https://api.gamemonitoring.ru/votes/
     enforce-ip-allowlist: false
     allowed-ips: []

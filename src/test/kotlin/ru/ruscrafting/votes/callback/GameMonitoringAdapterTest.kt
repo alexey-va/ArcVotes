@@ -28,6 +28,16 @@ class GameMonitoringAdapterTest : StringSpec({
         network = NetworkSourcePolicy(false, emptySet()),
     )
 
+    "HTTP lookup uses configured endpoint and request timeout" {
+        val configured = settings.copy(
+            apiBaseUrl = URI("https://api.gamemonitoring.ru/v2/votes/"),
+            requestTimeoutMs = 7_500,
+        )
+        val request = HttpGameMonitoringVoteLookup(configured).requestFor("event-42")
+        request.uri().toString() shouldBe "https://api.gamemonitoring.ru/v2/votes/event-42"
+        request.timeout().orElseThrow().toMillis() shouldBe 7_500
+    }
+
     "signed vote webhook is resolved through the authoritative API result" {
         val eventId = "9824cabb-2203-437e-9b6c-aba43dde3e4b"
         val calls = AtomicInteger()
@@ -67,6 +77,7 @@ class GameMonitoringAdapterTest : StringSpec({
         calls.get() shouldBe 0
         adapter.successResponse.status shouldBe 204
     }
+
 })
 
 private fun jsonRequest(body: String): CallbackRequest = CallbackRequest(

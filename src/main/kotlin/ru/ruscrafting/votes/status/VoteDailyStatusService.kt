@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Caches the callback-derived `/vote` state for one Moscow calendar day.
+ * Caches the callback-derived `/vote` state for one configured calendar day.
  *
  * Cache misses use asynchronous SQL through [VoteHistoryLookup]. Concurrent
  * misses for one player share a future; reward reconciliation augments an
@@ -24,6 +24,8 @@ class VoteDailyStatusService(
     private val history: VoteHistoryLookup,
     private val clock: Clock = Clock.systemUTC(),
     private val cacheTtl: Duration = Duration.ofSeconds(30),
+    private val voteDayZone: ZoneId = ZoneId.of("Europe/Moscow"),
+    private val maximumCacheEntries: Int = 2_048,
 ) {
     private val cache = ConcurrentHashMap<String, CachedStatus>()
     private val inFlight = ConcurrentHashMap<String, CompletableFuture<Set<MonitoringSource>>>()
@@ -31,6 +33,9 @@ class VoteDailyStatusService(
     init {
         require(!cacheTtl.isNegative && !cacheTtl.isZero && cacheTtl <= MAXIMUM_CACHE_TTL) {
             "Vote status cache TTL must be between 1 second and 5 minutes"
+        }
+        require(maximumCacheEntries in 128..MAXIMUM_CACHE_ENTRIES) {
+            "Vote status maximum cache entries must be between 128 and $MAXIMUM_CACHE_ENTRIES"
         }
     }
 
@@ -44,8 +49,8 @@ class VoteDailyStatusService(
         cache.remove(key)
         trimExpired(now)
 
-        val from = day.atStartOfDay(VOTE_DAY_ZONE).toInstant()
-        val until = day.plusDays(1).atStartOfDay(VOTE_DAY_ZONE).toInstant()
+        val from = day.atStartOfDay(voteDayZone).toInstant()
+        val until = day.plusDays(1).atStartOfDay(voteDayZone).toInstant()
         val promise = CompletableFuture<Set<MonitoringSource>>()
         inFlight.putIfAbsent(key, promise)?.let { return it }
         try {
@@ -55,7 +60,7 @@ class VoteDailyStatusService(
                 } else {
                     val immutable = sources.orEmpty().toSet()
                     val completedAt = clock.instant()
-                    if (cache.size < MAXIMUM_CACHE_ENTRIES) {
+                    if (cache.size < maximumCacheEntries) {
                         cache[key] = CachedStatus(day, completedAt.plus(cacheTtl), immutable)
                     }
                     promise.complete(immutable)
@@ -80,11 +85,11 @@ class VoteDailyStatusService(
     }
 
     private fun trimExpired(now: Instant) {
-        if (cache.size < MAXIMUM_CACHE_ENTRIES) return
+        if (cache.size < maximumCacheEntries) return
         cache.entries.removeIf { (_, status) -> !now.isBefore(status.expiresAt) }
     }
 
-    private fun day(instant: Instant): LocalDate = instant.atZone(VOTE_DAY_ZONE).toLocalDate()
+    private fun day(instant: Instant): LocalDate = instant.atZone(voteDayZone).toLocalDate()
 
     private data class CachedStatus(
         val day: LocalDate,
@@ -93,8 +98,7 @@ class VoteDailyStatusService(
     )
 
     private companion object {
-        val VOTE_DAY_ZONE: ZoneId = ZoneId.of("Europe/Moscow")
         val MAXIMUM_CACHE_TTL: Duration = Duration.ofMinutes(5)
-        const val MAXIMUM_CACHE_ENTRIES = 2_048
+        const val MAXIMUM_CACHE_ENTRIES = 10_000
     }
 }

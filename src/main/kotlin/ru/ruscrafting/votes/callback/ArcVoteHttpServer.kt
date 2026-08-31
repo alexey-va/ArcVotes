@@ -18,23 +18,34 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Level
 import java.util.logging.Logger
 
+data class ArcVoteHttpState(
+    val settings: HttpSettings,
+    val ingress: VoteIngressService?,
+)
+
 /** Loopback-only feature ingress. Public TLS/routing belongs to the managed reverse proxy. */
 class ArcVoteHttpServer(
-    private val settings: HttpSettings,
-    private val ingress: VoteIngressService,
+    initialSettings: HttpSettings,
+    private val currentState: () -> ArcVoteHttpState,
     private val logger: Logger,
 ) : AutoCloseable {
     private val threadSequence = AtomicInteger()
     private val executor = ThreadPoolExecutor(
-        settings.workerThreads,
-        settings.workerThreads,
+        initialSettings.workerThreads,
+        initialSettings.workerThreads,
         0L,
         TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(settings.queueCapacity),
+        ArrayBlockingQueue(initialSettings.queueCapacity),
         { task -> Thread(task, "arc-votes-http-${threadSequence.incrementAndGet()}").apply { isDaemon = true } },
         ThreadPoolExecutor.AbortPolicy(),
     )
-    private val server = HttpServer.create(InetSocketAddress(settings.bindAddress, settings.port), 0).apply {
+
+    constructor(settings: HttpSettings, ingress: VoteIngressService, logger: Logger) : this(
+        settings,
+        { ArcVoteHttpState(settings, ingress) },
+        logger,
+    )
+    private val server = HttpServer.create(InetSocketAddress(initialSettings.bindAddress, initialSettings.port), 0).apply {
         executor = this@ArcVoteHttpServer.executor
         createContext("/", ::handle)
     }
@@ -56,23 +67,12 @@ class ArcVoteHttpServer(
 
     private fun handle(exchange: HttpExchange) {
         val response = try {
-            val path = exchange.requestURI.rawPath
-            if (exchange.requestURI.rawQuery != null || path !in VoteIngressService.KNOWN_PATHS) {
-                CallbackResponse.error(404, "not_found")
-            } else if (exchange.requestMethod != "POST") {
-                exchange.responseHeaders.set("Allow", "POST")
-                CallbackResponse.error(405, "method_not_allowed")
-            } else {
-                val headers = validatedHeaders(exchange)
-                val request = CallbackRequest(
-                    method = exchange.requestMethod,
-                    path = path,
-                    headers = headers,
-                    body = readBody(exchange, headers),
-                    clientAddress = clientAddress(exchange, headers),
-                )
-                ingress.handle(request).get(settings.persistenceTimeoutMs, TimeUnit.MILLISECONDS)
-            }
+            val state = currentState()
+            val settings = state.settings
+            val ingress = state.ingress
+            if (!settings.enabled || ingress == null) {
+                CallbackResponse.error(503, "service_disabled")
+            } else handleEnabled(exchange, settings, ingress)
         } catch (rejected: CallbackRejected) {
             CallbackResponse.error(rejected.status, rejected.safeCode)
         } catch (_: TimeoutException) {
@@ -87,7 +87,27 @@ class ArcVoteHttpServer(
         send(exchange, response)
     }
 
-    private fun validatedHeaders(exchange: HttpExchange): Map<String, List<String>> {
+    private fun handleEnabled(exchange: HttpExchange, settings: HttpSettings, ingress: VoteIngressService): CallbackResponse {
+        val path = exchange.requestURI.rawPath
+        return if (exchange.requestURI.rawQuery != null || path !in VoteIngressService.KNOWN_PATHS) {
+            CallbackResponse.error(404, "not_found")
+        } else if (exchange.requestMethod != "POST") {
+            exchange.responseHeaders.set("Allow", "POST")
+            CallbackResponse.error(405, "method_not_allowed")
+        } else {
+            val headers = validatedHeaders(exchange, settings)
+            val request = CallbackRequest(
+                method = exchange.requestMethod,
+                path = path,
+                headers = headers,
+                body = readBody(exchange, headers, settings),
+                clientAddress = clientAddress(exchange, headers, settings),
+            )
+            ingress.handle(request).get(settings.persistenceTimeoutMs, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private fun validatedHeaders(exchange: HttpExchange, settings: HttpSettings): Map<String, List<String>> {
         val result = linkedMapOf<String, List<String>>()
         var count = 0
         var characters = 0
@@ -97,7 +117,8 @@ class ArcVoteHttpServer(
             val values = rawValues.toList()
             count += values.size
             characters += name.length + values.sumOf(String::length)
-            if (count > 32 || characters > 8_192 || values.any { it.length > 4_096 || '\r' in it || '\n' in it }) {
+            if (count > settings.maximumHeaderCount || characters > settings.maximumHeaderBytes ||
+                values.any { it.length > settings.maximumHeaderValueBytes || '\r' in it || '\n' in it }) {
                 throw CallbackRejected(431, "headers_too_large")
             }
             result[name] = values
@@ -105,7 +126,7 @@ class ArcVoteHttpServer(
         return result
     }
 
-    private fun readBody(exchange: HttpExchange, headers: Map<String, List<String>>): ByteArray {
+    private fun readBody(exchange: HttpExchange, headers: Map<String, List<String>>, settings: HttpSettings): ByteArray {
         val declared = headers["content-length"]?.let { values ->
             if (values.size != 1) throw CallbackRejected(400, "duplicate_header")
             values.single().toLongOrNull() ?: throw CallbackRejected(400, "invalid_content_length")
@@ -127,7 +148,7 @@ class ArcVoteHttpServer(
         return output.toByteArray()
     }
 
-    private fun clientAddress(exchange: HttpExchange, headers: Map<String, List<String>>): InetAddress {
+    private fun clientAddress(exchange: HttpExchange, headers: Map<String, List<String>>, settings: HttpSettings): InetAddress {
         val direct = exchange.remoteAddress.address ?: throw CallbackRejected(400, "missing_client_address")
         if (!settings.trustSingleForwardedClientIp || !direct.isLoopbackAddress) return direct
         val forwarded = headers["x-forwarded-for"] ?: return direct

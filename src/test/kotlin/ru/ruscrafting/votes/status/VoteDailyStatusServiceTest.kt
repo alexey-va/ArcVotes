@@ -63,4 +63,5 @@ class VoteDailyStatusServiceTest : FreeSpec({
 
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING)
     }
+
 })

@@ -2,7 +2,7 @@
 
 Small Paper plugin for RusCrafting vote links, authenticated monitoring callbacks, durable deduplication, and configurable Vault plus RedisEconomy rewards.
 
-`/vote` reads accepted callbacks for the current `Europe/Moscow` calendar day and marks each monitoring that the player has already used, while keeping every destination clickable.
+`/vote` reads accepted callbacks for the configured vote-day calendar window and marks each monitoring that the player has already used, while keeping every destination clickable.
 
 Supported callback routes:
 
@@ -17,6 +17,14 @@ The HTTP listener binds to loopback by default and is disabled in the bundled co
 
 Paper reconciles pending rewards for online players every five seconds by default, so a player does not need to reconnect after voting. The interval, per-player batch bound, standard Vault amount, and RedisEconomy currency/amount are configured under `reward`; the bundled plugin remains reward-disabled until an operator enables its production profile.
 
+## Hot reload
+
+Run `/arcvotes reload` with `arcvotes.admin.reload` after editing `config.yml`, `lang/ru.yml`, `lang/en.yml`, or the plugin-local `.env`. ArcVotes reads and validates an isolated candidate first and publishes the complete generation atomically; an invalid candidate leaves the current settings, callback ingress, and reward delivery active.
+
+Live settings include locale selection and messages, monitoring enablement/presentation/authentication/network policy, reward enablement/components/amounts/currency/limits, vote-day cache settings, GameMonitoring HTTP limits, and the callback body/header/persistence/forwarded-address policy. Callback counters and in-flight requests survive reloads. Pending rows retain their original reward bundle, including a historical premium currency id.
+
+`server-id` and every `mysql` field require a plugin/server restart. While the HTTP listener remains enabled, `http.bind-address`, `http.port`, `http.worker-threads`, and `http.queue-capacity` also require a restart. Those four listener fields can instead be changed live in two reloads: disable `http.enabled`, reload, edit/re-enable, then reload again. Enabling callbacks or rewards live still requires MySQL to have been initialized at startup and the required Vault/RedisEconomy providers to be available.
+
 ## Secrets
 
 Tracked YAML contains environment-variable names only. Set the variables named in `config.yml`, or place `KEY=value` entries in the plugin-local `.env` file. The latter is ignored by Git and must be readable only by the Minecraft service account.
@@ -27,4 +35,4 @@ Tracked YAML contains environment-variable names only. Set the variables named i
 ./gradlew --no-daemon clean test shadowJar -ParcCoreDir=../arc-core
 ```
 
-The packaged plugin is `build/libs/ArcVotes-0.2.1.jar`. MySQL integration tests run in CI, not in the local lane.
+The packaged plugin is `build/libs/ArcVotes-0.3.0.jar`. MySQL integration tests run in CI, not in the local lane.

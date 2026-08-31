@@ -23,6 +23,11 @@ commands:
   help: '<prefix> <#fff4e3>Использование:</color> <#ffcf70>/vote</color>'
   state-enabled: '<#8fe1c2><bold>✓ ВКЛ</bold></color>'
   state-disabled: '<#ff8f7a><bold>— ВЫКЛ</bold></color>'
+  reload-success: '<prefix> <#4de3a2>Настройки голосований обновлены.</color>'
+  reload-failed: '<prefix> <#ff8f7a>Настройки не обновлены.</color>'
+  reload-restart-required: '<prefix> <#ffc98c>Перезапуск нужен<fields>.</color>'
+  reload-busy: '<prefix> <#ffc98c>Обновление уже выполняется.</color>'
+  reload-help: '<prefix> <#fff4e3>Использование:</color> <#ffcf70>/arcvotes reload</color>'
   status:
     - '<prefix> <#fff4e3><bold>Состояние сервиса</bold></color>'
     - '  <#ffcf70>•</color> <#fff4e3>HTTP-приёмник</color> <http>'

@@ -23,6 +23,11 @@ commands:
   help: '<prefix> <#fff4e3>Usage:</color> <#ffcf70>/vote</color>'
   state-enabled: '<#8fe1c2><bold>✓ ON</bold></color>'
   state-disabled: '<#ff8f7a><bold>— OFF</bold></color>'
+  reload-success: '<prefix> <#4de3a2>Vote settings were reloaded.</color>'
+  reload-failed: '<prefix> <#ff8f7a>Vote settings were not reloaded.</color>'
+  reload-restart-required: '<prefix> <#ffc98c>Restart required<fields>.</color>'
+  reload-busy: '<prefix> <#ffc98c>A reload is already in progress.</color>'
+  reload-help: '<prefix> <#fff4e3>Usage:</color> <#ffcf70>/arcvotes reload</color>'
   status:
     - '<prefix> <#fff4e3><bold>Service status</bold></color>'
     - '  <#ffcf70>•</color> <#fff4e3>HTTP ingress</color> <http>'

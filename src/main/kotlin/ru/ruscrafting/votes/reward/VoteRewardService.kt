@@ -19,17 +19,17 @@ import ru.arc.onetime.OneTimeUseCommitResult
 import ru.arc.onetime.OneTimeUseLedger
 import ru.arc.onetime.OneTimeUseReleaseResult
 import ru.arc.onetime.OneTimeUseScope
-import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.domain.RewardState
 import ru.ruscrafting.votes.domain.VoteEvent
 import ru.ruscrafting.votes.domain.VoteRewardComponent
+import ru.ruscrafting.votes.live.VoteLiveConfiguration
 import ru.ruscrafting.votes.storage.VoteRepository
-import ru.ruscrafting.votes.status.VoteDailyStatusService
-import ru.ruscrafting.votes.text.VoteLocale
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -45,23 +45,32 @@ class VoteRewardService(
     private val tasks: LifecycleTaskScope,
     private val repository: VoteRepository,
     private val ledger: OneTimeUseLedger,
-    private val depositor: VoteRewardDepositor,
-    private val settings: ArcVotesSettings,
-    private val locale: VoteLocale,
+    private val live: () -> VoteLiveConfiguration,
     private val logger: Logger,
-    private val dailyStatus: VoteDailyStatusService? = null,
-) : Listener {
+    private val pollTasks: LifecycleTaskScope = LifecycleTaskScope(),
+    private val nanoTime: () -> Long = System::nanoTime,
+) : Listener, AutoCloseable {
     private val activePlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val pollInFlight = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
-    private val scope = OneTimeUseScope.parse(settings.serverId)
+    private val nextPollAtNanos = AtomicLong(0L)
+    private val scope = OneTimeUseScope.parse(live().settings.serverId)
     private val debug = StructuredDebugLine("ARCVOTES_REWARD")
 
     fun start() {
         check(started.compareAndSet(false, true)) { "Vote reward service is already started" }
-        val periodTicks = settings.reward.pollIntervalSeconds * TICKS_PER_SECOND
-        tasks.runTimer(periodTicks, periodTicks, ::pollOnlinePlayers)
-        pollOnlinePlayers()
+        schedulePolling()
+        pollTick()
+    }
+
+    /** Applies a new interval without replacing the timer or invalidating in-flight callbacks. */
+    fun reconfigurePolling() {
+        check(started.get()) { "Vote reward service is not started" }
+        nextPollAtNanos.set(0L)
+    }
+
+    override fun close() {
+        pollTasks.close()
     }
 
     @EventHandler
@@ -71,6 +80,7 @@ class VoteRewardService(
 
     fun onDurableEvent(event: VoteEvent) {
         if (event.rewardState != RewardState.PENDING) return
+        if (!live().settings.reward.enabled) return
         tasks.runSync {
             server.onlinePlayers.firstOrNull { it.name.equals(event.vote.playerName.value, ignoreCase = true) }
                 ?.let(::deliverPending)
@@ -78,17 +88,19 @@ class VoteRewardService(
     }
 
     internal fun pollOnlinePlayers() {
-        if (!settings.reward.enabled || !pollInFlight.compareAndSet(false, true)) return
+        val runtime = live()
+        val reward = runtime.settings.reward
+        if (!reward.enabled || !pollInFlight.compareAndSet(false, true)) return
         val online = server.onlinePlayers
             .asSequence()
-            .take(MAXIMUM_ONLINE_PLAYER_BATCH)
+            .take(reward.maximumOnlinePlayerBatch)
             .associateBy { it.name.lowercase(Locale.ROOT) }
         if (online.isEmpty()) {
             pollInFlight.set(false)
             return
         }
         val names = online.values.mapTo(linkedSetOf()) { NetworkPlayerName.of(it.name) }
-        repository.findPendingForPlayers(names, settings.reward.maximumPendingPerPlayer)
+        repository.findPendingForPlayers(names, reward.maximumPendingPerPlayer)
             .whenCompleteSync(tasks) { pending, failure ->
                 pollInFlight.set(false)
                 if (failure != null) {
@@ -102,8 +114,9 @@ class VoteRewardService(
     }
 
     fun deliverPending(player: Player) {
-        if (!settings.reward.enabled || !activePlayers.add(player.uniqueId)) return
-        repository.findPending(NetworkPlayerName.of(player.name), settings.reward.maximumPendingPerPlayer)
+        val reward = live().settings.reward
+        if (!reward.enabled || !activePlayers.add(player.uniqueId)) return
+        repository.findPending(NetworkPlayerName.of(player.name), reward.maximumPendingPerPlayer)
             .whenCompleteSync(tasks) { events, failure ->
                 if (failure != null) {
                     logger.log(Level.WARNING, "Could not load pending vote rewards", failure)
@@ -124,10 +137,15 @@ class VoteRewardService(
             finish(player.uniqueId)
             return
         }
+        val runtime = live()
+        if (!runtime.settings.reward.enabled) {
+            finish(player.uniqueId)
+            return
+        }
         val event = events[eventIndex]
-        dailyStatus?.observe(event)
+        runtime.dailyStatus?.observe(event)
         val components = requireNotNull(event.reward) { "Pending vote has no reward bundle" }.components
-        deliverComponent(player, event, components, componentIndex = 0, anyApplied = false, events, eventIndex)
+        deliverComponent(player, event, components, componentIndex = 0, anyApplied = false, events, eventIndex, runtime)
     }
 
     private fun deliverComponent(
@@ -138,9 +156,10 @@ class VoteRewardService(
         anyApplied: Boolean,
         events: List<VoteEvent>,
         eventIndex: Int,
+        runtime: VoteLiveConfiguration,
     ) {
         if (componentIndex >= components.size) {
-            markGranted(player, event, notify = anyApplied, events, eventIndex)
+            markGranted(player, event, notify = anyApplied, events, eventIndex, runtime)
             return
         }
         if (!player.isOnline) {
@@ -168,7 +187,17 @@ class VoteRewardService(
             when (result) {
                 is OneTimeUseClaimResult.Acquired -> {
                     if (result.claim.newlyCreated) {
-                        applyComponent(player, event, components, componentIndex, anyApplied, result.claim, events, eventIndex)
+                        applyComponent(
+                            player,
+                            event,
+                            components,
+                            componentIndex,
+                            anyApplied,
+                            result.claim,
+                            events,
+                            eventIndex,
+                            runtime,
+                        )
                     } else {
                         abandonForRecovery(
                             player,
@@ -182,7 +211,16 @@ class VoteRewardService(
                     }
                 }
                 OneTimeUseClaimResult.AlreadyConsumed ->
-                    deliverComponent(player, event, components, componentIndex + 1, anyApplied, events, eventIndex)
+                    deliverComponent(
+                        player,
+                        event,
+                        components,
+                        componentIndex + 1,
+                        anyApplied,
+                        events,
+                        eventIndex,
+                        runtime,
+                    )
                 OneTimeUseClaimResult.Busy -> deliverNextEvent(player, events, eventIndex + 1)
                 OneTimeUseClaimResult.IdentityConflict,
                 OneTimeUseClaimResult.Missing,
@@ -201,6 +239,7 @@ class VoteRewardService(
         claim: OneTimeUseClaim,
         events: List<VoteEvent>,
         eventIndex: Int,
+        runtime: VoteLiveConfiguration,
     ) {
         val component = components[componentIndex]
         if (!player.isOnline) {
@@ -208,7 +247,7 @@ class VoteRewardService(
             return
         }
         val result = try {
-            depositor.deposit(player, component)
+            requireNotNull(runtime.rewardDepositor) { "Vote reward provider is unavailable" }.deposit(player, component)
         } catch (failure: Throwable) {
             logger.log(
                 Level.SEVERE,
@@ -234,7 +273,16 @@ class VoteRewardService(
                 )
                 abandonForRecovery(player, event, component, claim, "commit_unknown", events, eventIndex)
             } else {
-                deliverComponent(player, event, components, componentIndex + 1, anyApplied = true, events, eventIndex)
+                deliverComponent(
+                    player,
+                    event,
+                    components,
+                    componentIndex + 1,
+                    anyApplied = true,
+                    events,
+                    eventIndex,
+                    runtime,
+                )
             }
         }
     }
@@ -280,36 +328,37 @@ class VoteRewardService(
         notify: Boolean,
         events: List<VoteEvent>,
         eventIndex: Int,
+        runtime: VoteLiveConfiguration,
     ) {
         repository.markGranted(event.id, player.uniqueId).whenCompleteSync(tasks) { updated, failure ->
             if (failure != null) {
                 logger.log(Level.SEVERE, debug.line("source" to event.vote.source.configKey, "outcome" to "state_unknown"), failure)
             } else if (updated == true && notify && player.isOnline) {
-                runCatching { sendRewardMessage(player, event) }
+                runCatching { sendRewardMessage(player, event, runtime) }
                     .onFailure { displayFailure -> logger.log(Level.WARNING, "Vote reward was granted but its message could not be shown", displayFailure) }
             }
             deliverNextEvent(player, events, eventIndex + 1)
         }
     }
 
-    private fun sendRewardMessage(player: Player, event: VoteEvent) {
-        val presentation = settings.presentations.getValue(event.vote.source)
+    private fun sendRewardMessage(player: Player, event: VoteEvent, runtime: VoteLiveConfiguration) {
+        val presentation = runtime.settings.presentations.getValue(event.vote.source)
         val rewardComponents = requireNotNull(event.reward).components.map { component ->
-            locale.render(
+            runtime.locale.render(
                 "reward.component-${component.key}",
                 player,
-                mapOf("amount" to locale.text(component.amount.stripTrailingZeros().toPlainString())),
+                mapOf("amount" to runtime.locale.text(component.amount.stripTrailingZeros().toPlainString())),
             )
         }
         val rewards = Component.join(
-            JoinConfiguration.separator(locale.render("reward.component-separator", player)),
+            JoinConfiguration.separator(runtime.locale.render("reward.component-separator", player)),
             rewardComponents,
         )
-        locale.renderLines(
+        runtime.locale.renderLines(
             "reward.granted",
             player,
             mapOf(
-                "site" to locale.site(event.vote.source, player, presentation.displayName),
+                "site" to runtime.locale.site(event.vote.source, player, presentation.displayName),
                 "rewards" to rewards,
             ),
         ).forEach(player::sendMessage)
@@ -341,8 +390,27 @@ class VoteRewardService(
         activePlayers.remove(playerId)
     }
 
+    private fun schedulePolling() {
+        checkNotNull(pollTasks.runTimer(POLL_TICK_TICKS, POLL_TICK_TICKS, ::pollTick)) {
+            "Vote reward poll scope is not active"
+        }
+    }
+
+    private fun pollTick() {
+        val now = nanoTime()
+        while (true) {
+            val current = nextPollAtNanos.get()
+            if (current > now) return
+            val interval = TimeUnit.SECONDS.toNanos(live().settings.reward.pollIntervalSeconds)
+            if (nextPollAtNanos.compareAndSet(current, now + interval)) {
+                pollOnlinePlayers()
+                return
+            }
+        }
+    }
+
     private companion object {
         const val TICKS_PER_SECOND = 20L
-        const val MAXIMUM_ONLINE_PLAYER_BATCH = 500
+        const val POLL_TICK_TICKS = TICKS_PER_SECOND
     }
 }

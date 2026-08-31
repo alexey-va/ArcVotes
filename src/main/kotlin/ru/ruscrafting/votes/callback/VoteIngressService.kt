@@ -20,11 +20,32 @@ data class VoteIngressSnapshot(
     val upstreamFailures: Long,
 )
 
+/** Shared across ingress generations so reloads do not reset operational counters. */
+class VoteIngressCounters {
+    private val accepted = AtomicLong()
+    private val duplicates = AtomicLong()
+    private val rejected = AtomicLong()
+    private val upstreamFailures = AtomicLong()
+
+    fun accepted() = accepted.incrementAndGet()
+    fun duplicate() = duplicates.incrementAndGet()
+    fun rejected() = rejected.incrementAndGet()
+    fun upstreamFailure() = upstreamFailures.incrementAndGet()
+
+    fun snapshot() = VoteIngressSnapshot(
+        accepted = accepted.get(),
+        duplicates = duplicates.get(),
+        rejected = rejected.get(),
+        upstreamFailures = upstreamFailures.get(),
+    )
+}
+
 class VoteIngressService(
     settings: ArcVotesSettings,
     private val repository: VoteRepository,
     private val logger: Logger,
     private val onDurableEvent: (VoteEvent) -> Unit = {},
+    private val counters: VoteIngressCounters = VoteIngressCounters(),
 ) {
     private data class Route(val source: MonitoringSource, val adapter: VoteCallbackAdapter?)
 
@@ -50,15 +71,10 @@ class VoteIngressService(
         GAME_MONITORING_PATH to Route(
             MonitoringSource.GAME_MONITORING,
             settings.gameMonitoring.takeIf { it.enabled }?.let {
-                GameMonitoringAdapter(it, HttpGameMonitoringVoteLookup())
+                GameMonitoringAdapter(it, HttpGameMonitoringVoteLookup(it))
             },
         ),
     )
-    private val accepted = AtomicLong()
-    private val duplicates = AtomicLong()
-    private val rejected = AtomicLong()
-    private val upstreamFailures = AtomicLong()
-
     fun handle(request: CallbackRequest): CompletableFuture<CallbackResponse> {
         val route = routes[request.path] ?: return completed(CallbackResponse.error(404, "not_found"))
         val adapter = route.adapter ?: return completed(CallbackResponse.error(503, "source_disabled"))
@@ -72,19 +88,19 @@ class VoteIngressService(
                 is CallbackAuthenticationResult.Accepted -> repository.record(result.vote, reward).thenApply { recorded ->
                     when (recorded) {
                         is VoteRecordResult.Inserted -> {
-                            accepted.incrementAndGet()
+                            counters.accepted()
                             safelyNotify(recorded.event)
                             logger.info(debug.line("source" to route.source.configKey, "outcome" to "accepted"))
                             adapter.successResponse
                         }
                         is VoteRecordResult.Duplicate -> {
-                            duplicates.incrementAndGet()
+                            counters.duplicate()
                             safelyNotify(recorded.event)
                             logger.info(debug.line("source" to route.source.configKey, "outcome" to "duplicate"))
                             adapter.successResponse
                         }
                         VoteRecordResult.IdentityConflict -> {
-                            rejected.incrementAndGet()
+                            counters.rejected()
                             logger.warning(debug.line("source" to route.source.configKey, "outcome" to "identity_conflict"))
                             CallbackResponse.error(409, "identity_conflict")
                         }
@@ -99,12 +115,7 @@ class VoteIngressService(
         }
     }
 
-    fun snapshot(): VoteIngressSnapshot = VoteIngressSnapshot(
-        accepted = accepted.get(),
-        duplicates = duplicates.get(),
-        rejected = rejected.get(),
-        upstreamFailures = upstreamFailures.get(),
-    )
+    fun snapshot(): VoteIngressSnapshot = counters.snapshot()
 
     private fun safelyNotify(event: VoteEvent) {
         runCatching { onDurableEvent(event) }
@@ -113,17 +124,17 @@ class VoteIngressService(
 
     private fun failureResponse(source: MonitoringSource, failure: Throwable): CallbackResponse = when (failure) {
         is CallbackRejected -> {
-            rejected.incrementAndGet()
+            counters.rejected()
             logger.warning(debug.line("source" to source.configKey, "outcome" to "rejected", "code" to failure.safeCode))
             CallbackResponse.error(failure.status, failure.safeCode)
         }
         is CallbackUpstreamFailure -> {
-            upstreamFailures.incrementAndGet()
+            counters.upstreamFailure()
             logger.warning(debug.line("source" to source.configKey, "outcome" to "upstream_failure", "code" to failure.safeCode))
             CallbackResponse.error(503, "upstream_unavailable")
         }
         is java.io.IOException -> {
-            upstreamFailures.incrementAndGet()
+            counters.upstreamFailure()
             logger.warning(debug.line("source" to source.configKey, "outcome" to "upstream_failure", "code" to "transport"))
             CallbackResponse.error(503, "upstream_unavailable")
         }

@@ -11,8 +11,13 @@ commands:
     aliases: [votes, golos]
     usage: /vote [status]
     permission: arcvotes.use
+  arcvotes:
+    description: Reload ArcVotes configuration
+    usage: /arcvotes reload
 permissions:
   arcvotes.use:
     default: true
   arcvotes.admin.status:
+    default: op
+  arcvotes.admin.reload:
     default: op
