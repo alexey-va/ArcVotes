@@ -2,9 +2,9 @@
 
 Small Paper plugin for RusCrafting vote links, authenticated monitoring callbacks, durable deduplication, and configurable Vault plus RedisEconomy rewards.
 
-`/vote` reads accepted callbacks from the rolling 24-hour window and marks each monitoring that the player has already used, while keeping every destination clickable.
+`/vote` reads accepted callbacks and marks each monitoring while that provider still considers the vote active, while keeping every destination clickable. [MinecraftRating](https://minecraftrating.ru/faq.html) and [MonitoringMinecraft](https://monitoringminecraft.com/promote/) document rolling 24-hour windows, while [GameMonitoring](https://gamemonitoring.ru/minecraft/servers/14210383/vote) documents 12 hours. [HotMC](https://hotmc.ru/vote-242482) says one vote per day without publishing a timezone; ArcVotes therefore uses the configurable calendar boundary in `status.vote-day-zone` (Europe/Moscow by default), matching the observed site reset.
 
-Administrators can use `/vote check <player>` for the same cached rolling 24-hour view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only observable service health without exposing callback topology. History page size and the maximum accepted page number are live settings under `status`.
+Administrators can use `/vote check <player>` for the same cached provider-specific view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only observable service health without exposing callback topology. History page size and the maximum accepted page number are live settings under `status`.
 
 Supported callback routes:
 

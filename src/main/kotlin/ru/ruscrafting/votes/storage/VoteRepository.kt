@@ -38,12 +38,12 @@ interface VoteRepository {
 }
 
 fun interface VoteHistoryLookup {
-    /** Returns callback sources recorded for this player inside one bounded time window. */
-    fun findVotedSources(
+    /** Returns the latest callback per source for this player inside one bounded time window. */
+    fun findLatestVotes(
         playerName: NetworkPlayerName,
         fromInclusive: Instant,
         untilExclusive: Instant,
-    ): CompletableFuture<Set<MonitoringSource>>
+    ): CompletableFuture<Map<MonitoringSource, Instant>>
 }
 
 data class VoteHistoryPage(
@@ -166,11 +166,11 @@ class MySqlVoteRepository(
         }
     }
 
-    override fun findVotedSources(
+    override fun findLatestVotes(
         playerName: NetworkPlayerName,
         fromInclusive: Instant,
         untilExclusive: Instant,
-    ): CompletableFuture<Set<MonitoringSource>> {
+    ): CompletableFuture<Map<MonitoringSource, Instant>> {
         require(untilExclusive.isAfter(fromInclusive)) { "Vote history window must be positive" }
         require(Duration.between(fromInclusive, untilExclusive) <= MAXIMUM_HISTORY_WINDOW) {
             "Vote history window must not exceed 26 hours"
@@ -178,24 +178,24 @@ class MySqlVoteRepository(
         return runtime.executor.read { connection ->
             connection.prepareStatement(
                 """
-                SELECT DISTINCT `source`
+                SELECT `source`, MAX(`occurred_at`) AS `latest_occurred_at`
                 FROM `arc_votes_events`
                 WHERE `player_name_normalized` = ?
                   AND `occurred_at` >= ?
                   AND `occurred_at` < ?
+                GROUP BY `source`
                 """.trimIndent(),
             ).use { statement ->
                 statement.setString(1, playerName.value.lowercase(Locale.ROOT))
                 statement.setTimestamp(2, Timestamp.from(fromInclusive))
                 statement.setTimestamp(3, Timestamp.from(untilExclusive))
                 statement.executeQuery().use { rows ->
-                    buildSet {
+                    buildMap {
                         while (rows.next()) {
                             val sourceKey = rows.getString("source")
-                            add(
-                                MonitoringSource.entries.singleOrNull { it.configKey == sourceKey }
-                                    ?: error("Unknown stored vote source"),
-                            )
+                            val source = MonitoringSource.entries.singleOrNull { it.configKey == sourceKey }
+                                ?: error("Unknown stored vote source")
+                            put(source, rows.getTimestamp("latest_occurred_at").toInstant())
                         }
                     }
                 }

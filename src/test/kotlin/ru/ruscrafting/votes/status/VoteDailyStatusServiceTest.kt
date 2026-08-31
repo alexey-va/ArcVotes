@@ -18,7 +18,7 @@ class VoteDailyStatusServiceTest : FreeSpec({
     "repeated lookups share one MySQL result during the cache TTL" {
         val now = Instant.parse("2026-08-31T12:00:00Z")
         var queries = 0
-        val pending = CompletableFuture<Set<MonitoringSource>>()
+        val pending = CompletableFuture<Map<MonitoringSource, Instant>>()
         val history = VoteHistoryLookup { _, _, _ ->
             queries += 1
             pending
@@ -31,7 +31,7 @@ class VoteDailyStatusServiceTest : FreeSpec({
         queries shouldBe 1
         concurrent shouldBe first
 
-        pending.complete(setOf(MonitoringSource.HOTMC))
+        pending.complete(mapOf(MonitoringSource.HOTMC to now))
         first.join() shouldBe setOf(MonitoringSource.HOTMC)
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC)
         queries shouldBe 1
@@ -40,53 +40,64 @@ class VoteDailyStatusServiceTest : FreeSpec({
     "pending reward observation augments an already warm cache" {
         val now = Instant.parse("2026-08-31T12:00:00Z")
         val service = VoteDailyStatusService(
-            VoteHistoryLookup { _, _, _ -> CompletableFuture.completedFuture(setOf(MonitoringSource.HOTMC)) },
+            VoteHistoryLookup { _, _, _ ->
+                CompletableFuture.completedFuture(mapOf(MonitoringSource.HOTMC to now))
+            },
             Clock.fixed(now, ZoneId.of("UTC")),
         )
         val player = NetworkPlayerName.of("Steve")
         service.find(player).join()
 
-        service.observe(
-            VoteEvent(
-                id = java.util.UUID.randomUUID(),
-                vote = AuthenticatedVote(
-                    MonitoringSource.GAME_MONITORING,
-                    "daily-status:test",
-                    player,
-                    now,
-                ),
-                receivedAt = now,
-                reward = null,
-                rewardState = RewardState.NONE,
-            ),
-        )
+        service.observe(voteEvent(MonitoringSource.GAME_MONITORING, player, now))
 
         service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING)
     }
 
-    "Moscow midnight does not reset or duplicate the rolling lookup" {
+    "HotMC resets at Moscow midnight without waiting for cache TTL" {
         val clock = MutableClock(Instant.parse("2026-08-31T20:59:59Z"))
-        val pending = CompletableFuture<Set<MonitoringSource>>()
         var queries = 0
-        val history = VoteHistoryLookup { _, _, _ ->
-            queries += 1
-            pending
-        }
-        val service = VoteDailyStatusService(history, clock, Duration.ofSeconds(30))
+        val voteAt = Instant.parse("2026-08-31T20:00:00Z")
+        val service = VoteDailyStatusService(
+            history = VoteHistoryLookup { _, _, _ ->
+                queries += 1
+                CompletableFuture.completedFuture(mapOf(MonitoringSource.HOTMC to voteAt))
+            },
+            clock = clock,
+            cacheTtl = Duration.ofMinutes(5),
+            voteDayZone = ZoneId.of("Europe/Moscow"),
+        )
         val player = NetworkPlayerName.of("Steve")
 
-        val beforeMidnight = service.find(player)
+        service.find(player).join() shouldBe setOf(MonitoringSource.HOTMC)
         clock.current = Instant.parse("2026-08-31T21:00:01Z")
-        val afterMidnight = service.find(player)
-
-        queries shouldBe 1
-        (afterMidnight === beforeMidnight) shouldBe true
-        pending.complete(setOf(MonitoringSource.HOTMC))
-        beforeMidnight.join() shouldBe setOf(MonitoringSource.HOTMC)
-        afterMidnight.join() shouldBe setOf(MonitoringSource.HOTMC)
+        service.find(player).join() shouldBe emptySet()
+        queries shouldBe 2
     }
 
-    "lookup covers the previous rolling 24 hours" {
+    "each provider uses its published repeat-vote window" {
+        val now = Instant.parse("2026-08-31T12:00:00Z")
+        val service = VoteDailyStatusService(
+            history = VoteHistoryLookup { _, _, _ ->
+                CompletableFuture.completedFuture(
+                    mapOf(
+                        MonitoringSource.MINECRAFT_RATING to now.minus(Duration.ofHours(23)),
+                        MonitoringSource.HOTMC to Instant.parse("2026-08-30T21:30:00Z"),
+                        MonitoringSource.MONITORING_MINECRAFT to now.minus(Duration.ofHours(24)),
+                        MonitoringSource.GAME_MONITORING to now.minus(Duration.ofHours(12)),
+                    ),
+                )
+            },
+            clock = Clock.fixed(now, ZoneId.of("UTC")),
+            voteDayZone = ZoneId.of("Europe/Moscow"),
+        )
+
+        service.find(NetworkPlayerName.of("Steve")).join() shouldBe setOf(
+            MonitoringSource.MINECRAFT_RATING,
+            MonitoringSource.HOTMC,
+        )
+    }
+
+    "lookup covers the longest rolling provider window" {
         val now = Instant.parse("2026-08-31T12:34:56Z")
         var requestedFrom: Instant? = null
         var requestedUntil: Instant? = null
@@ -94,7 +105,7 @@ class VoteDailyStatusServiceTest : FreeSpec({
             VoteHistoryLookup { _, from, until ->
                 requestedFrom = from
                 requestedUntil = until
-                CompletableFuture.completedFuture(emptySet())
+                CompletableFuture.completedFuture(emptyMap())
             },
             Clock.fixed(now, ZoneId.of("UTC")),
         )
@@ -105,33 +116,34 @@ class VoteDailyStatusServiceTest : FreeSpec({
         requestedUntil shouldBe now
     }
 
-    "observation older than 24 hours does not block voting" {
+    "observation outside its provider window does not block voting" {
         val now = Instant.parse("2026-08-31T12:00:00Z")
         val service = VoteDailyStatusService(
-            VoteHistoryLookup { _, _, _ -> CompletableFuture.completedFuture(emptySet()) },
+            VoteHistoryLookup { _, _, _ -> CompletableFuture.completedFuture(emptyMap()) },
             Clock.fixed(now, ZoneId.of("UTC")),
         )
         val player = NetworkPlayerName.of("Steve")
         service.find(player).join()
 
         service.observe(
-            VoteEvent(
-                id = java.util.UUID.randomUUID(),
-                vote = AuthenticatedVote(
-                    MonitoringSource.GAME_MONITORING,
-                    "rolling-status:expired",
-                    player,
-                    now.minus(Duration.ofHours(24)).minusMillis(1),
-                ),
-                receivedAt = now,
-                reward = null,
-                rewardState = RewardState.NONE,
+            voteEvent(
+                MonitoringSource.GAME_MONITORING,
+                player,
+                now.minus(Duration.ofHours(12)),
             ),
         )
 
         service.find(player).join() shouldBe emptySet()
     }
 })
+
+private fun voteEvent(source: MonitoringSource, player: NetworkPlayerName, occurredAt: Instant) = VoteEvent(
+    id = java.util.UUID.randomUUID(),
+    vote = AuthenticatedVote(source, "status:${source.configKey}:$occurredAt", player, occurredAt),
+    receivedAt = occurredAt,
+    reward = null,
+    rewardState = RewardState.NONE,
+)
 
 private class MutableClock(
     var current: Instant,

@@ -47,7 +47,7 @@ commands:
     - '  <#8c8c8c>Rejected:</color> <#e6fff3><rejected></color> <#666666>·</color> <#8c8c8c>API failures:</color> <#e6fff3><upstream_failures></color>'
   player-check:
     - '<prefix> <#e6fff3>Player <#92bed8><player></color></color>'
-    - '  <#8c8c8c>Last 24 hours:</color> <#e6fff3><voted_count> of <total_count></color>'
+    - '  <#8c8c8c>Active votes:</color> <#e6fff3><voted_count> of <total_count></color>'
     - '  <minecraft_rating_state> <#e6fff3><check_minecraft_rating></color>'
     - '  <hotmc_state> <#e6fff3><check_hotmc></color>'
     - '  <monitoring_minecraft_state> <#e6fff3><check_monitoring_minecraft></color>'

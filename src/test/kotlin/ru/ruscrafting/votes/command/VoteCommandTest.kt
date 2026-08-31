@@ -88,7 +88,7 @@ class VoteCommandTest : StringSpec({
         status.contains("MinecraftRating") shouldBe false
     }
 
-    "vote marks monitoring callbacks received during the rolling 24 hours" {
+    "vote marks monitoring callbacks active under provider rules" {
         val root = Files.createTempDirectory("arcvotes-command-history")
         val settings = ArcVotesSettings.load(root) { null }
         val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
@@ -104,7 +104,12 @@ class VoteCommandTest : StringSpec({
         val history = VoteHistoryLookup { _, from, until ->
             requestedFrom = from
             requestedUntil = until
-            CompletableFuture.completedFuture(setOf(MonitoringSource.MINECRAFT_RATING, MonitoringSource.HOTMC))
+            CompletableFuture.completedFuture(
+                mapOf(
+                    MonitoringSource.MINECRAFT_RATING to Instant.parse("2026-08-31T11:00:00Z"),
+                    MonitoringSource.HOTMC to Instant.parse("2026-08-31T11:00:00Z"),
+                ),
+            )
         }
         val dailyStatus = VoteDailyStatusService(
             history,
@@ -135,7 +140,7 @@ class VoteCommandTest : StringSpec({
         every { player.name } returns "Steve"
         every { player.isOnline } returns true
         every { player.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
-        val status = CompletableFuture<Set<MonitoringSource>>()
+        val status = CompletableFuture<Map<MonitoringSource, Instant>>()
         val dailyStatus = VoteDailyStatusService(VoteHistoryLookup { _, _, _ -> status })
         val live = VoteLiveState(VoteLiveConfiguration(settings, locale, dailyStatus, null, null, false, false))
         val scheduler = TestTaskScheduler()
@@ -153,7 +158,7 @@ class VoteCommandTest : StringSpec({
                 ),
             ),
         )
-        status.complete(emptySet())
+        status.complete(emptyMap())
         scheduler.executeImmediate()
 
         messages shouldHaveSize 7
@@ -165,7 +170,7 @@ class VoteCommandTest : StringSpec({
             .toSet()
     }
 
-    "admin check uses the bounded rolling cache for another player" {
+    "admin check uses the bounded provider-specific cache for another player" {
         val root = Files.createTempDirectory("arcvotes-command-check")
         val settings = ArcVotesSettings.load(root) { null }
         val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
@@ -175,11 +180,18 @@ class VoteCommandTest : StringSpec({
         every { sender.hasPermission("arcvotes.admin.inspect") } returns true
         every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
         var lookups = 0
+        val now = Instant.parse("2026-08-31T12:00:00Z")
         val dailyStatus = VoteDailyStatusService(
             VoteHistoryLookup { _, _, _ ->
                 lookups++
-                CompletableFuture.completedFuture(setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING))
+                CompletableFuture.completedFuture(
+                    mapOf(
+                        MonitoringSource.HOTMC to now,
+                        MonitoringSource.GAME_MONITORING to now,
+                    ),
+                )
             },
+            Clock.fixed(now, ZoneOffset.UTC),
         )
         val scheduler = TestTaskScheduler()
         val live = VoteLiveState(VoteLiveConfiguration(settings, locale, dailyStatus, null, null, false, false))
@@ -194,7 +206,7 @@ class VoteCommandTest : StringSpec({
         messages shouldHaveSize 12
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.contains("Игрок Alex") shouldBe true
-        plain.contains("За последние 24 часа: 2 из 4") shouldBe true
+        plain.contains("Активные голоса: 2 из 4") shouldBe true
         plain.count { it == '✔' } shouldBe 4
         plain.count { it == '◇' } shouldBe 4
     }

@@ -7,12 +7,13 @@ import ru.ruscrafting.votes.storage.VoteHistoryLookup
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Caches callback-derived `/vote` availability for the rolling 24-hour vote window.
+ * Caches callback-derived `/vote` availability using each provider's published repeat-vote rule.
  *
  * Cache misses use asynchronous SQL through [VoteHistoryLookup]. Concurrent
  * misses for one player share a future; reward reconciliation augments an
@@ -23,7 +24,9 @@ class VoteDailyStatusService(
     private val clock: Clock = Clock.systemUTC(),
     private val cacheTtl: Duration = Duration.ofSeconds(30),
     private val maximumCacheEntries: Int = 2_048,
+    voteDayZone: ZoneId = ZoneId.of("Europe/Moscow"),
 ) {
+    private val windows = VoteWindowPolicy(voteDayZone)
     private val cache = ConcurrentHashMap<String, CachedStatus>()
     private val inFlight = ConcurrentHashMap<String, CompletableFuture<Set<MonitoringSource>>>()
 
@@ -46,18 +49,25 @@ class VoteDailyStatusService(
         if (cached != null) cache.remove(key, cached)
         trimExpired(now)
 
-        val from = now.minus(VOTE_COOLDOWN)
+        val from = windows.queryStart(now)
         val promise = CompletableFuture<Set<MonitoringSource>>()
         inFlight.putIfAbsent(key, promise)?.let { return it }
         try {
-            history.findVotedSources(playerName, from, now).whenComplete { sources, failure ->
+            history.findLatestVotes(playerName, from, now).whenComplete { latestVotes, failure ->
                 if (failure != null) {
                     promise.completeExceptionally(failure)
                 } else {
-                    val immutable = sources.orEmpty().toSet()
                     val completedAt = clock.instant()
+                    val activeVotes = latestVotes.orEmpty().filter { (source, voteAt) ->
+                        windows.isActive(source, voteAt, completedAt)
+                    }
+                    val immutable = activeVotes.keys.toSet()
+                    val policyExpiry = activeVotes.minOfOrNull { (source, voteAt) ->
+                        windows.activeUntil(source, voteAt)
+                    }
+                    val expiresAt = minOf(completedAt.plus(cacheTtl), policyExpiry ?: Instant.MAX)
                     if (cache.size < maximumCacheEntries || cache.containsKey(key)) {
-                        cache[key] = CachedStatus(completedAt.plus(cacheTtl), immutable)
+                        cache[key] = CachedStatus(expiresAt, immutable)
                     }
                     promise.complete(immutable)
                 }
@@ -71,10 +81,17 @@ class VoteDailyStatusService(
 
     fun observe(event: VoteEvent) {
         val now = clock.instant()
-        if (event.vote.occurredAt.isBefore(now.minus(VOTE_COOLDOWN))) return
+        if (!windows.isActive(event.vote.source, event.vote.occurredAt, now)) return
         val key = event.vote.normalizedPlayerName
         cache.computeIfPresent(key) { _, status ->
-            if (!now.isBefore(status.expiresAt)) null else status.copy(sources = status.sources + event.vote.source)
+            if (!now.isBefore(status.expiresAt)) {
+                null
+            } else {
+                status.copy(
+                    expiresAt = minOf(status.expiresAt, windows.activeUntil(event.vote.source, event.vote.occurredAt)),
+                    sources = status.sources + event.vote.source,
+                )
+            }
         }
     }
 
@@ -89,7 +106,6 @@ class VoteDailyStatusService(
     )
 
     private companion object {
-        val VOTE_COOLDOWN: Duration = Duration.ofHours(24)
         val MAXIMUM_CACHE_TTL: Duration = Duration.ofMinutes(5)
         const val MAXIMUM_CACHE_ENTRIES = 10_000
     }

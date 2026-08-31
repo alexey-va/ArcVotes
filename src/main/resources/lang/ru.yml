@@ -47,7 +47,7 @@ commands:
     - '  <#8c8c8c>Отклонено:</color> <#e6fff3><rejected></color> <#666666>·</color> <#8c8c8c>ошибок API:</color> <#e6fff3><upstream_failures></color>'
   player-check:
     - '<prefix> <#e6fff3>Игрок <#92bed8><player></color></color>'
-    - '  <#8c8c8c>За последние 24 часа:</color> <#e6fff3><voted_count> из <total_count></color>'
+    - '  <#8c8c8c>Активные голоса:</color> <#e6fff3><voted_count> из <total_count></color>'
     - '  <minecraft_rating_state> <#e6fff3><check_minecraft_rating></color>'
     - '  <hotmc_state> <#e6fff3><check_hotmc></color>'
     - '  <monitoring_minecraft_state> <#e6fff3><check_monitoring_minecraft></color>'
