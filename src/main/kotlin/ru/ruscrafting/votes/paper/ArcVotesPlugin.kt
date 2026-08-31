@@ -158,7 +158,7 @@ class ArcVotesPlugin : JavaPlugin() {
             val redisEconomy = !settings.reward.enabled || redisEconomyReady.get()
             RuntimeHealthContribution(
                 state = if (mysql && http && vault && redisEconomy) RuntimeHealthState.UP else RuntimeHealthState.DOWN,
-                schemas = mapOf("votes" to 3),
+                schemas = mapOf("votes" to 4),
                 dependencies = mapOf(
                     "mysql" to mysql,
                     "callback_http" to http,
@@ -198,7 +198,8 @@ class ArcVotesPlugin : JavaPlugin() {
     }
 
     private fun mergeBundledDefaults() {
-        listOf("config.yml", "lang/ru.yml", "lang/en.yml").forEach { resource ->
+        ArcVotesSettings.mergeDefaults(dataPath)
+        listOf("lang/ru.yml", "lang/en.yml").forEach { resource ->
             ConfigManager.of(dataPath, resource).mergeMissingFromBundled(resource)
         }
     }

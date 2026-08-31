@@ -18,7 +18,6 @@ import ru.arc.onetime.OneTimeUseClaimResult
 import ru.arc.onetime.OneTimeUseCommitResult
 import ru.arc.onetime.OneTimeUseLedger
 import ru.arc.onetime.OneTimeUseReleaseResult
-import ru.arc.onetime.OneTimeUseScope
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.domain.RewardState
 import ru.ruscrafting.votes.domain.VoteEvent
@@ -54,7 +53,6 @@ class VoteRewardService(
     private val activePlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val pollInFlight = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
-    private val scope = OneTimeUseScope.parse(settings.serverId)
     private val debug = StructuredDebugLine("ARCVOTES_REWARD")
 
     fun start() {
@@ -153,7 +151,6 @@ class VoteRewardService(
             identity = identity,
             claimId = identity.useId,
             claimantId = player.uniqueId,
-            scope = scope,
         )
         ledger.claim(request).whenCompleteSync(tasks) { result, failure ->
             if (failure != null) {

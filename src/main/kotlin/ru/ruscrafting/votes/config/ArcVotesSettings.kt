@@ -178,6 +178,12 @@ data class ArcVotesSettings(
     }
 
     companion object {
+        fun mergeDefaults(dataRoot: Path) {
+            val config = ConfigManager.of(dataRoot, "config.yml")
+            migrateLegacyReward(config)
+            config.mergeMissingFromBundled("config.yml")
+        }
+
         fun load(
             dataRoot: Path,
             environment: (String) -> String? = System::getenv,
@@ -223,6 +229,22 @@ data class ArcVotesSettings(
                 monitoringMinecraft = loadMonitoringMinecraft(config, secrets),
                 gameMonitoring = loadGameMonitoring(config, secrets),
             )
+        }
+
+        private fun migrateLegacyReward(config: Config) {
+            if (config.stringOrNull("reward.standard.amount") != null) return
+            val legacyAmountText = config.stringOrNull("reward.amount") ?: run {
+                if (config.exists("reward.enabled") || config.exists("reward.currency-label")) {
+                    throw IllegalArgumentException("Legacy reward.amount is required")
+                }
+                return
+            }
+            val legacyAmount = legacyAmountText.trim().toBigDecimalOrNull()
+                ?: throw IllegalArgumentException("Legacy reward.amount must be a decimal")
+            config.setBoolean("reward.standard.enabled", true)
+            config.setString("reward.standard.amount", legacyAmount.toPlainString())
+            config.setBoolean("reward.premium.enabled", false)
+            config.saveStrict()
         }
 
         private fun loadSql(config: Config, secrets: SecretResolver): SqlConnectionConfig {

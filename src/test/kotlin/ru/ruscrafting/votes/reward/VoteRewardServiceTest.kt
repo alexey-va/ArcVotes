@@ -136,13 +136,53 @@ class VoteRewardServiceTest : FreeSpec({
             component.color()?.value() == 0xFF5F56 && plain.serialize(component).contains("HotMC")
         } shouldBe true
     }
+
+    "a claim abandoned on another backend is quarantined instead of left pending forever" {
+        val scheduler = TestTaskScheduler()
+        val player = player("Steve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val event = voteEvent()
+        val repository = RecordingRepository(pending = listOf(event))
+        val requests = mutableListOf<OneTimeUseClaimRequest>()
+        val ledger = object : OneTimeUseLedger {
+            override fun claim(request: OneTimeUseClaimRequest): CompletableFuture<OneTimeUseClaimResult> {
+                requests += request
+                val result = if (request.scope == null) {
+                    OneTimeUseClaimResult.Acquired(OneTimeUseClaim.acquired(request, newlyCreated = false))
+                } else {
+                    OneTimeUseClaimResult.Busy
+                }
+                return CompletableFuture.completedFuture(result)
+            }
+
+            override fun abandon(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseAbandonResult> =
+                CompletableFuture.completedFuture(OneTimeUseAbandonResult.RETAINED_FOR_RECOVERY)
+
+            override fun commit(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseCommitResult> =
+                CompletableFuture.failedFuture(AssertionError("recovered claim must not be committed"))
+
+            override fun release(claim: OneTimeUseClaim): CompletableFuture<OneTimeUseReleaseResult> =
+                CompletableFuture.failedFuture(AssertionError("recovered claim must not be released"))
+        }
+        val service = service(server, scheduler, repository, ledger, VoteRewardDepositor { _, _ ->
+            throw AssertionError("recovered claim must not repeat the reward effect")
+        })
+
+        service.deliverPending(player)
+        repeat(12) { scheduler.executeImmediate() }
+
+        requests.single().scope shouldBe null
+        repository.recoveries shouldContainExactly listOf(Triple(event.id, player.uniqueId, "claim_recovered"))
+        repository.granted shouldBe emptyList()
+    }
 })
 
 private fun service(
     server: Server,
     scheduler: TestTaskScheduler,
     repository: RecordingRepository,
-    ledger: RecordingLedger,
+    ledger: OneTimeUseLedger,
     depositor: VoteRewardDepositor,
     locale: VoteLocale = mockk(relaxed = true),
 ): VoteRewardService {
@@ -207,6 +247,7 @@ private class RecordingRepository(
 ) : VoteRepository {
     val polledNames = mutableListOf<Set<NetworkPlayerName>>()
     val granted = mutableListOf<UUID>()
+    val recoveries = mutableListOf<Triple<UUID, UUID?, String>>()
     var singlePlayerLookups = 0
 
     override fun initialize(): CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
@@ -237,8 +278,10 @@ private class RecordingRepository(
         return CompletableFuture.completedFuture(markGrantedResult)
     }
 
-    override fun markRecovery(eventId: UUID, playerId: UUID?, failureCode: String): CompletableFuture<Boolean> =
-        CompletableFuture.completedFuture(true)
+    override fun markRecovery(eventId: UUID, playerId: UUID?, failureCode: String): CompletableFuture<Boolean> {
+        recoveries += Triple(eventId, playerId, failureCode)
+        return CompletableFuture.completedFuture(true)
+    }
 }
 
 private fun Component.descendantsAndSelf(): List<Component> =
