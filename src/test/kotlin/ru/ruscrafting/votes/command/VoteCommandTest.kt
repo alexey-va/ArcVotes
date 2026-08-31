@@ -16,15 +16,25 @@ import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.TestTaskScheduler
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.MonitoringSource
+import ru.ruscrafting.votes.domain.AuthenticatedVote
+import ru.ruscrafting.votes.domain.RewardProvider
+import ru.ruscrafting.votes.domain.RewardState
+import ru.ruscrafting.votes.domain.VoteEvent
+import ru.ruscrafting.votes.domain.VoteRewardBundle
+import ru.ruscrafting.votes.domain.VoteRewardComponent
 import ru.ruscrafting.votes.live.VoteLiveConfiguration
 import ru.ruscrafting.votes.live.VoteLiveState
+import ru.ruscrafting.votes.storage.VoteHistoryPage
 import ru.ruscrafting.votes.storage.VoteHistoryLookup
+import ru.ruscrafting.votes.storage.VoteHistoryPageLookup
 import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
+import java.math.BigDecimal
 import java.nio.file.Files
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.logging.Logger
 
@@ -67,7 +77,11 @@ class VoteCommandTest : StringSpec({
         messages.clear()
         every { sender.hasPermission("arcvotes.admin.status") } returns true
         vote.onCommand(sender, command, "vote", arrayOf("status")) shouldBe true
-        messages shouldHaveSize 9
+        messages shouldHaveSize 4
+        val status = messages.joinToString("\n") { plain.serialize(it) }
+        status.contains("ProxyARC на Velocity") shouldBe true
+        status.contains("ВЫКЛ") shouldBe false
+        status.contains("MinecraftRating") shouldBe false
     }
 
     "vote marks monitoring callbacks received during the current Moscow day" {
@@ -145,6 +159,106 @@ class VoteCommandTest : StringSpec({
             .toSet() shouldBe settings.presentations.values
             .map { ClickEvent.openUrl(it.voteUrl.toASCIIString()) }
             .toSet()
+    }
+
+    "admin check uses the bounded daily cache for another player" {
+        val root = Files.createTempDirectory("arcvotes-command-check")
+        val settings = ArcVotesSettings.load(root) { null }
+        val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
+        val sender = mockk<CommandSender>(relaxed = true)
+        val command = mockk<Command>(relaxed = true)
+        val messages = mutableListOf<Component>()
+        every { sender.hasPermission("arcvotes.admin.inspect") } returns true
+        every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        var lookups = 0
+        val dailyStatus = VoteDailyStatusService(
+            VoteHistoryLookup { _, _, _ ->
+                lookups++
+                CompletableFuture.completedFuture(setOf(MonitoringSource.HOTMC, MonitoringSource.GAME_MONITORING))
+            },
+        )
+        val scheduler = TestTaskScheduler()
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, dailyStatus, null, null, false, false))
+        val vote = VoteCommand(live::current, LifecycleTaskScope(scheduler), Logger.getAnonymousLogger())
+
+        repeat(2) {
+            vote.onCommand(sender, command, "vote", arrayOf("check", "Alex")) shouldBe true
+            scheduler.executeImmediate()
+        }
+
+        lookups shouldBe 1
+        messages shouldHaveSize 12
+        val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+        plain.contains("Игрок Alex") shouldBe true
+        plain.contains("Сегодня: 2 из 4") shouldBe true
+        plain.count { it == '✔' } shouldBe 4
+        plain.count { it == '◇' } shouldBe 4
+    }
+
+    "admin history renders a newest-first page with clickable navigation" {
+        val root = Files.createTempDirectory("arcvotes-command-history-page")
+        val settings = ArcVotesSettings.load(root) { null }
+        val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
+        val sender = mockk<CommandSender>(relaxed = true)
+        val command = mockk<Command>(relaxed = true)
+        val messages = mutableListOf<Component>()
+        every { sender.hasPermission("arcvotes.admin.inspect") } returns true
+        every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        val reward = VoteRewardBundle(
+            listOf(VoteRewardComponent("standard", RewardProvider.VAULT, BigDecimal("1000.00"))),
+        )
+        val entries = listOf(
+            VoteEvent(
+                UUID.randomUUID(),
+                AuthenticatedVote(
+                    MonitoringSource.MONITORING_MINECRAFT,
+                    "history:2",
+                    ru.arc.network.NetworkPlayerName.of("Alex"),
+                    Instant.parse("2026-08-31T12:17:00Z"),
+                ),
+                Instant.parse("2026-08-31T12:17:01Z"),
+                reward,
+                RewardState.GRANTED,
+            ),
+            VoteEvent(
+                UUID.randomUUID(),
+                AuthenticatedVote(
+                    MonitoringSource.HOTMC,
+                    "history:1",
+                    ru.arc.network.NetworkPlayerName.of("Alex"),
+                    Instant.parse("2026-08-30T20:10:00Z"),
+                ),
+                Instant.parse("2026-08-30T20:10:01Z"),
+                reward,
+                RewardState.PENDING,
+            ),
+        )
+        var requestedPage = -1
+        var requestedSize = -1
+        val history = VoteHistoryPageLookup { _, page, pageSize ->
+            requestedPage = page
+            requestedSize = pageSize
+            CompletableFuture.completedFuture(VoteHistoryPage(entries, 17))
+        }
+        val scheduler = TestTaskScheduler()
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
+        val vote = VoteCommand(live::current, LifecycleTaskScope(scheduler), Logger.getAnonymousLogger(), history)
+
+        vote.onCommand(sender, command, "vote", arrayOf("history", "Alex", "2")) shouldBe true
+        scheduler.executeImmediate()
+
+        requestedPage shouldBe 1
+        requestedSize shouldBe 8
+        messages shouldHaveSize 5
+        val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+        plain.contains("История Alex") shouldBe true
+        plain.contains("Всего: 17 · страница 2 из 3") shouldBe true
+        plain.contains("MonitoringMinecraft · ✔ выдана") shouldBe true
+        plain.contains("HotMC · ⌚ ожидает") shouldBe true
+        messages.flatMap(Component::descendantsAndSelf).mapNotNull(Component::clickEvent).toSet() shouldBe setOf(
+            ClickEvent.runCommand("/vote history Alex 1"),
+            ClickEvent.runCommand("/vote history Alex 3"),
+        )
     }
 })
 

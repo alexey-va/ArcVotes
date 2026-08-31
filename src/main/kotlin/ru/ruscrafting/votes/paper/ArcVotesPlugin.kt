@@ -139,7 +139,7 @@ class ArcVotesPlugin : JavaPlugin() {
                 ),
             ).also(ArcVotesReloadController::startInitialHttp)
 
-            val voteCommand = VoteCommand(live::current, runtime.tasks, logger)
+            val voteCommand = VoteCommand(live::current, runtime.tasks, logger, repository)
             requireNotNull(getCommand("vote")).apply {
                 setExecutor(voteCommand)
                 tabCompleter = voteCommand

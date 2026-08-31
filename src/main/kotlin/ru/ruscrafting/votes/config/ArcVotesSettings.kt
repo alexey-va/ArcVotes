@@ -178,10 +178,14 @@ data class StatusSettings(
     val voteDayZone: ZoneId = ZoneId.of("Europe/Moscow"),
     val cacheTtlSeconds: Long = 30,
     val maximumCacheEntries: Int = 2_048,
+    val historyPageSize: Int = 8,
+    val historyMaximumPages: Int = 1_000,
 ) {
     init {
         require(cacheTtlSeconds in 1..300) { "status.cache-ttl-seconds must be between 1 and 300" }
         require(maximumCacheEntries in 128..10_000) { "status.maximum-cache-entries must be between 128 and 10000" }
+        require(historyPageSize in 1..20) { "status.history-page-size must be between 1 and 20" }
+        require(historyMaximumPages in 1..1_000) { "status.history-maximum-pages must be between 1 and 1000" }
     }
 }
 
@@ -285,6 +289,8 @@ data class ArcVotesSettings(
                     voteDayZone = ZoneId.of(config.string("status.vote-day-zone", "Europe/Moscow").trim()),
                     cacheTtlSeconds = config.long("status.cache-ttl-seconds", 30),
                     maximumCacheEntries = config.int("status.maximum-cache-entries", 2048),
+                    historyPageSize = config.int("status.history-page-size", 8),
+                    historyMaximumPages = config.int("status.history-maximum-pages", 1000),
                 ),
                 minecraftRating = loadSignedForm(config, secrets, MonitoringSource.MINECRAFT_RATING),
                 hotMc = loadSignedForm(config, secrets, MonitoringSource.HOTMC),

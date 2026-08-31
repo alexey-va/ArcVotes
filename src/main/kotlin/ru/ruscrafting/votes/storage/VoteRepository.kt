@@ -46,10 +46,24 @@ fun interface VoteHistoryLookup {
     ): CompletableFuture<Set<MonitoringSource>>
 }
 
+data class VoteHistoryPage(
+    val entries: List<VoteEvent>,
+    val totalEntries: Long,
+)
+
+fun interface VoteHistoryPageLookup {
+    /** Returns one bounded newest-first page plus the player's total accepted vote count. */
+    fun findHistory(
+        playerName: NetworkPlayerName,
+        pageIndex: Int,
+        pageSize: Int,
+    ): CompletableFuture<VoteHistoryPage>
+}
+
 class MySqlVoteRepository(
     private val runtime: SqlRuntime,
     private val clock: Clock = Clock.systemUTC(),
-) : VoteRepository, VoteHistoryLookup {
+) : VoteRepository, VoteHistoryLookup, VoteHistoryPageLookup {
     override fun initialize(): CompletableFuture<Unit> = runtime.executor
         .submit { MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(VoteMigrations.ALL) }
         .thenApply { Unit }
@@ -186,6 +200,62 @@ class MySqlVoteRepository(
                     }
                 }
             }
+        }
+    }
+
+    override fun findHistory(
+        playerName: NetworkPlayerName,
+        pageIndex: Int,
+        pageSize: Int,
+    ): CompletableFuture<VoteHistoryPage> {
+        require(pageIndex in 0 until MAXIMUM_HISTORY_PAGES) {
+            "Vote history page must be between 1 and $MAXIMUM_HISTORY_PAGES"
+        }
+        require(pageSize in 1..MAXIMUM_HISTORY_PAGE_SIZE) {
+            "Vote history page size must be between 1 and $MAXIMUM_HISTORY_PAGE_SIZE"
+        }
+        val offset = pageIndex * pageSize
+        val normalized = playerName.value.lowercase(Locale.ROOT)
+        return runtime.executor.read { connection ->
+            val total = connection.prepareStatement(
+                "SELECT COUNT(*) FROM `arc_votes_events` WHERE `player_name_normalized` = ?",
+            ).use { statement ->
+                statement.setString(1, normalized)
+                statement.executeQuery().use { rows ->
+                    check(rows.next()) { "Vote history count did not return a row" }
+                    rows.getLong(1)
+                }
+            }
+            val entries = if (offset >= total) {
+                emptyList()
+            } else {
+                connection.prepareStatement(
+                    """
+                    SELECT `event`.`event_uuid`, `event`.`source`, `event`.`external_id`, `event`.`player_name`,
+                           `event`.`player_name_normalized`, `event`.`occurred_at`, `event`.`received_at`,
+                           `event`.`reward_amount`, `event`.`reward_state`, `event`.`player_uuid`,
+                           `component`.`component_key`, `component`.`provider`, `component`.`currency_id`,
+                           `component`.`amount` AS `component_amount`
+                    FROM (
+                        SELECT *
+                        FROM `arc_votes_events`
+                        WHERE `player_name_normalized` = ?
+                        ORDER BY `received_at` DESC, `event_uuid` DESC
+                        LIMIT ? OFFSET ?
+                    ) AS `event`
+                    LEFT JOIN `arc_votes_reward_components` AS `component`
+                        ON `component`.`event_uuid` = `event`.`event_uuid`
+                    ORDER BY `event`.`received_at` DESC, `event`.`event_uuid` DESC,
+                             CASE `component`.`component_key` WHEN 'standard' THEN 0 WHEN 'premium' THEN 1 ELSE 2 END ASC
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setString(1, normalized)
+                    statement.setInt(2, pageSize)
+                    statement.setInt(3, offset)
+                    statement.executeQuery().use(::readEvents)
+                }
+            }
+            VoteHistoryPage(entries, total)
         }
     }
 
@@ -341,6 +411,8 @@ class MySqlVoteRepository(
         const val MIGRATION_NAMESPACE = "arc_votes"
         const val STANDARD_COMPONENT_KEY = "standard"
         const val MAXIMUM_PLAYER_BATCH = 500
+        const val MAXIMUM_HISTORY_PAGE_SIZE = 20
+        const val MAXIMUM_HISTORY_PAGES = 1_000
         const val MYSQL_DUPLICATE_KEY = 1062
         const val SQL_STATE_INTEGRITY_CONSTRAINT = "23000"
         val MAXIMUM_HISTORY_WINDOW: Duration = Duration.ofHours(26)

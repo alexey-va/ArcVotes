@@ -4,6 +4,8 @@ Small Paper plugin for RusCrafting vote links, authenticated monitoring callback
 
 `/vote` reads accepted callbacks for the configured vote-day calendar window and marks each monitoring that the player has already used, while keeping every destination clickable.
 
+Administrators can use `/vote check <player>` for the same cached current-day view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only the local Paper responsibilities; on the production Paper profile it names ProxyARC on Velocity as the callback owner instead of presenting intentionally disabled local ingress adapters as failed services. History page size and the maximum accepted page number are live settings under `status`.
+
 Supported callback routes:
 
 | Monitoring | Route | Contract |

@@ -36,6 +36,8 @@ class ArcVotesSettingsTest : StringSpec({
         settings.status.voteDayZone shouldBe ZoneId.of("Europe/Moscow")
         settings.status.cacheTtlSeconds shouldBe 30L
         settings.status.maximumCacheEntries shouldBe 2048
+        settings.status.historyPageSize shouldBe 8
+        settings.status.historyMaximumPages shouldBe 1000
         settings.enabledSources shouldBe emptySet()
         VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale }).validate()
     }
@@ -68,6 +70,8 @@ class ArcVotesSettingsTest : StringSpec({
 
     "new limits reject unsafe values" {
         shouldThrow<IllegalArgumentException> { StatusSettings(cacheTtlSeconds = 0) }
+        shouldThrow<IllegalArgumentException> { StatusSettings(historyPageSize = 21) }
+        shouldThrow<IllegalArgumentException> { StatusSettings(historyMaximumPages = 0) }
         shouldThrow<IllegalArgumentException> {
             HttpSettings(
                 enabled = false,

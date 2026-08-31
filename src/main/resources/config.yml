@@ -64,6 +64,9 @@ status:
   vote-day-zone: Europe/Moscow
   cache-ttl-seconds: 30
   maximum-cache-entries: 2048
+  # Admin /vote history pagination. Both fields update live with /arcvotes reload.
+  history-page-size: 8
+  history-maximum-pages: 1000
 
 monitorings:
   minecraft-rating:
