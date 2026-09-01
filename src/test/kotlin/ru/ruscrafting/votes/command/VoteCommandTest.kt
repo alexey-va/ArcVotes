@@ -78,7 +78,9 @@ class VoteCommandTest : StringSpec({
             ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.HOTMC).voteUrl.toASCIIString()) to 0xFF5F56,
             ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.MONITORING_MINECRAFT).voteUrl.toASCIIString()) to 0x43D995,
         )
-        messages.joinToString("\n") { plain.serialize(it) }.contains("GameMonitoring") shouldBe false
+        val rendered = messages.joinToString("\n") { plain.serialize(it) }
+        rendered.contains("GameMonitoring") shouldBe false
+        rendered.contains("</color>") shouldBe false
 
         messages.clear()
         every { sender.hasPermission("arcvotes.admin.status") } returns true

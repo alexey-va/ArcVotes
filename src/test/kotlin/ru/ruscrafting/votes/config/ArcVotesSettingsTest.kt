@@ -66,7 +66,7 @@ class ArcVotesSettingsTest : StringSpec({
 
         listOf("ru", "en").forEach { language ->
             val locale = Config(root, "lang/$language.yml")
-            locale.stringList("commands.public-vote-list").size shouldBe 6
+            locale.stringList("commands.vote-suggestions").size shouldBe 6
             locale.stringOrNull("reward.component-spacing") shouldBe "<white> </white>"
             locale.stringList("commands.vote-list") shouldBe listOf("legacy list")
             locale.stringOrNull("reward.component-separator") shouldBe "legacy separator"

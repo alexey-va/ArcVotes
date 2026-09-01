@@ -5,12 +5,12 @@ sites:
   monitoring-minecraft: '<#43d995><name></color>'
   game-monitoring: '<#b784ff><name></color>'
 commands:
-  public-vote-list:
+  vote-suggestions:
     - '<reset>'
-    - '<prefix> <#fff4e3>Поддержите сервер на трёх сайтах:</color>'
-    - '<minecraft_rating_state> <minecraft_rating> <#ffe0bd>— открыть</color>'
-    - '<hotmc_state> <hotmc> <#ffe0bd>— открыть</color>'
-    - '<monitoring_minecraft_state> <monitoring_minecraft> <#ffe0bd>— открыть</color>'
+    - '<prefix> <#fff4e3>Поддержите сервер на трёх сайтах:</#fff4e3>'
+    - '<minecraft_rating_state> <minecraft_rating> <#ffe0bd>— открыть</#ffe0bd>'
+    - '<hotmc_state> <hotmc> <#ffe0bd>— открыть</#ffe0bd>'
+    - '<monitoring_minecraft_state> <monitoring_minecraft> <#ffe0bd>— открыть</#ffe0bd>'
     - '<reset>'
   reward-note: |-
     <#ffd9b3>На сайте укажите свой игровой ник.</color>

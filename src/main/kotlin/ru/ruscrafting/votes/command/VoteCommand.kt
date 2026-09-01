@@ -367,7 +367,7 @@ class VoteCommand(
             "game_monitoring" to links.getValue(MonitoringSource.GAME_MONITORING),
             "game_monitoring_state" to voteState(runtime, sender, MonitoringSource.GAME_MONITORING in votedSources),
         )
-        runtime.locale.renderLines("commands.public-vote-list", sender, values).forEach(sender::sendMessage)
+        runtime.locale.renderLines("commands.vote-suggestions", sender, values).forEach(sender::sendMessage)
         if (runtime.settings.reward.enabled) {
             sender.sendMessage(runtime.locale.render("commands.reward-note", sender))
         }

@@ -95,7 +95,7 @@ class VoteLocale private constructor(
                     "reward.component-spacing",
                 ),
                 listPaths = setOf(
-                    "commands.public-vote-list",
+                    "commands.vote-suggestions",
                     "commands.admin-help",
                     "commands.status",
                     "commands.status-ingress",
