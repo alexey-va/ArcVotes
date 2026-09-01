@@ -98,7 +98,7 @@ class MySqlVoteRepositoryIntegrationTest : FreeSpec({
             NetworkPlayerName.of("Steve"),
             Instant.parse("2026-08-30T21:00:00Z"),
             Instant.parse("2026-08-31T21:00:00Z"),
-        ).join().shouldBeEmpty()
+        ).join() shouldBe emptyMap()
         val history = repository.findHistory(NetworkPlayerName.of("sTeVe"), pageIndex = 0, pageSize = 8).join()
         history.totalEntries shouldBe 1
         history.entries.single().id shouldBe inserted.event.id
