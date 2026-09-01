@@ -351,7 +351,7 @@ class VoteRewardService(
             )
         }
         val rewards = Component.join(
-            JoinConfiguration.separator(runtime.locale.render("reward.component-separator", player)),
+            JoinConfiguration.separator(runtime.locale.render("reward.component-spacing", player)),
             rewardComponents,
         )
         runtime.locale.renderLines(

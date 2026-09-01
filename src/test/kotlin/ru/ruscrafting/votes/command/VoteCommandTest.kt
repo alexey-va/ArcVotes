@@ -42,7 +42,7 @@ import java.util.logging.Logger
 class VoteCommandTest : StringSpec({
     afterTest { ConfigManager.clear() }
 
-    "vote renders four real monitoring links and status as separate lines" {
+    "vote suggests three monitoring links while GameMonitoring stays hidden" {
         val root = Files.createTempDirectory("arcvotes-command")
         val settings = ArcVotesSettings.load(root) { null }
         val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
@@ -57,7 +57,7 @@ class VoteCommandTest : StringSpec({
         val vote = VoteCommand(live::current, tasks, Logger.getAnonymousLogger())
         vote.onCommand(sender, command, "vote", emptyArray()) shouldBe true
 
-        messages shouldHaveSize 7
+        messages shouldHaveSize 6
         val plain = PlainTextComponentSerializer.plainText()
         plain.serialize(messages.first()) shouldBe ""
         plain.serialize(messages.last()) shouldBe ""
@@ -68,13 +68,17 @@ class VoteCommandTest : StringSpec({
             .mapNotNull(Component::clickEvent)
             .filter { it.action() == ClickEvent.Action.OPEN_URL }
             .toSet()
-        links shouldBe settings.presentations.values.map { ClickEvent.openUrl(it.voteUrl.toASCIIString()) }.toSet()
+        links shouldBe settings.presentations
+            .filterKeys { it != MonitoringSource.GAME_MONITORING }
+            .values
+            .map { ClickEvent.openUrl(it.voteUrl.toASCIIString()) }
+            .toSet()
         linkComponents.associate { it.clickEvent()!! to it.color()?.value() } shouldBe mapOf(
             ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.MINECRAFT_RATING).voteUrl.toASCIIString()) to 0xFFC857,
             ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.HOTMC).voteUrl.toASCIIString()) to 0xFF5F56,
             ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.MONITORING_MINECRAFT).voteUrl.toASCIIString()) to 0x43D995,
-            ClickEvent.openUrl(settings.presentations.getValue(MonitoringSource.GAME_MONITORING).voteUrl.toASCIIString()) to 0xB784FF,
         )
+        messages.joinToString("\n") { plain.serialize(it) }.contains("GameMonitoring") shouldBe false
 
         messages.clear()
         every { sender.hasPermission("arcvotes.admin.status") } returns true
@@ -122,12 +126,12 @@ class VoteCommandTest : StringSpec({
         messages shouldHaveSize 0
         scheduler.executeImmediate()
 
-        messages shouldHaveSize 7
+        messages shouldHaveSize 6
         requestedFrom shouldBe Instant.parse("2026-08-30T12:00:00Z")
         requestedUntil shouldBe Instant.parse("2026-08-31T12:00:00Z")
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.count { it == '✔' } shouldBe 2
-        plain.count { it == '◇' } shouldBe 2
+        plain.count { it == '◇' } shouldBe 1
     }
 
     "an in-flight vote command renders one captured configuration generation" {
@@ -161,11 +165,13 @@ class VoteCommandTest : StringSpec({
         status.complete(emptyMap())
         scheduler.executeImmediate()
 
-        messages shouldHaveSize 7
+        messages shouldHaveSize 6
         messages
             .flatMap(Component::descendantsAndSelf)
             .mapNotNull(Component::clickEvent)
-            .toSet() shouldBe settings.presentations.values
+            .toSet() shouldBe settings.presentations
+            .filterKeys { it != MonitoringSource.GAME_MONITORING }
+            .values
             .map { ClickEvent.openUrl(it.voteUrl.toASCIIString()) }
             .toSet()
     }
@@ -207,6 +213,7 @@ class VoteCommandTest : StringSpec({
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.contains("Игрок Alex") shouldBe true
         plain.contains("Активные голоса: 2 из 4") shouldBe true
+        plain.contains("GameMonitoring") shouldBe true
         plain.count { it == '✔' } shouldBe 4
         plain.count { it == '◇' } shouldBe 4
     }

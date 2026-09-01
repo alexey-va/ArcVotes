@@ -140,6 +140,9 @@ class VoteRewardServiceTest : FreeSpec({
         messages.flatMap(Component::descendantsAndSelf).any { component ->
             component.color()?.value() == 0xFF5F56 && plain.serialize(component).contains("HotMC")
         } shouldBe true
+        val rendered = messages.joinToString("\n") { plain.serialize(it) }
+        rendered.contains("+1000 💰 +3 ") shouldBe true
+        rendered.contains("· +3") shouldBe false
     }
 
     "an in-flight event finishes with the generation captured before reload" {

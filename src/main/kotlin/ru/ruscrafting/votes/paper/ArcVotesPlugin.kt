@@ -260,9 +260,7 @@ class ArcVotesPlugin : JavaPlugin() {
 
     private fun mergeBundledDefaults() {
         ArcVotesSettings.mergeDefaults(dataPath)
-        listOf("lang/ru.yml", "lang/en.yml").forEach { resource ->
-            ConfigManager.of(dataPath, resource).mergeMissingFromBundled(resource)
-        }
+        VoteLocale.mergeDefaults(dataPath)
     }
 
     private companion object {

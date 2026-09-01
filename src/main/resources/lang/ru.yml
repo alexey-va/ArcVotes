@@ -5,13 +5,12 @@ sites:
   monitoring-minecraft: '<#43d995><name></color>'
   game-monitoring: '<#b784ff><name></color>'
 commands:
-  vote-list:
+  public-vote-list:
     - '<reset>'
-    - '<prefix> <#fff4e3>Поддержите сервер на четырёх сайтах:</color>'
+    - '<prefix> <#fff4e3>Поддержите сервер на трёх сайтах:</color>'
     - '<minecraft_rating_state> <minecraft_rating> <#ffe0bd>— открыть</color>'
     - '<hotmc_state> <hotmc> <#ffe0bd>— открыть</color>'
     - '<monitoring_minecraft_state> <monitoring_minecraft> <#ffe0bd>— открыть</color>'
-    - '<game_monitoring_state> <game_monitoring> <#ffe0bd>— открыть</color>'
     - '<reset>'
   reward-note: |-
     <#ffd9b3>На сайте укажите свой игровой ник.</color>
@@ -78,4 +77,4 @@ reward:
     - '  <rewards>'
   component-standard: '<#4de3a2>+<amount></color> <white>💰</white>'
   component-premium: '<#ffd166>+<amount></color> <white></white>'
-  component-separator: ' <#ffc98c>·</color> '
+  component-spacing: '<white> </white>'

@@ -3,6 +3,7 @@ package ru.ruscrafting.votes.config
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import ru.ruscrafting.votes.text.VoteLocale
 import java.nio.file.Files
@@ -44,6 +45,32 @@ class ArcVotesSettingsTest : StringSpec({
             URI("https://monitoringminecraft.com/vote/43/")
         settings.enabledSources shouldBe emptySet()
         VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale }).validate()
+    }
+
+    "locale merge adds the new public list and reward spacing without replacing old keys" {
+        val root = Files.createTempDirectory("arcvotes-locale-upgrade")
+        Files.createDirectories(root.resolve("lang"))
+        listOf("ru", "en").forEach { language ->
+            root.resolve("lang/$language.yml").writeText(
+                """
+                commands:
+                  vote-list:
+                    - legacy list
+                reward:
+                  component-separator: legacy separator
+                """.trimIndent(),
+            )
+        }
+
+        VoteLocale.mergeDefaults(root)
+
+        listOf("ru", "en").forEach { language ->
+            val locale = Config(root, "lang/$language.yml")
+            locale.stringList("commands.public-vote-list").size shouldBe 6
+            locale.stringOrNull("reward.component-spacing") shouldBe "<white> </white>"
+            locale.stringList("commands.vote-list") shouldBe listOf("legacy list")
+            locale.stringOrNull("reward.component-separator") shouldBe "legacy separator"
+        }
     }
 
     "consumer contract never opts into the metrics exporter" {

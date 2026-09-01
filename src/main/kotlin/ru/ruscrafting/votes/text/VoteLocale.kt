@@ -92,10 +92,10 @@ class VoteLocale private constructor(
                     "commands.reload-help",
                     "reward.component-standard",
                     "reward.component-premium",
-                    "reward.component-separator",
+                    "reward.component-spacing",
                 ),
                 listPaths = setOf(
-                    "commands.vote-list",
+                    "commands.public-vote-list",
                     "commands.admin-help",
                     "commands.status",
                     "commands.status-ingress",
@@ -112,6 +112,13 @@ class VoteLocale private constructor(
         if (useClientLocale() && audience is Player) audience.locale().toLanguageTag() else defaultLocale()
 
     companion object {
+        fun mergeDefaults(dataRoot: Path) {
+            listOf("ru", "en").forEach { language ->
+                val resource = "lang/$language.yml"
+                ConfigManager.of(dataRoot, resource).mergeMissingFromBundled(resource)
+            }
+        }
+
         /** Reads isolated Config instances so a rejected reload cannot mutate the live renderer. */
         fun fresh(
             dataRoot: Path,

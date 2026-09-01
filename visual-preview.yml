@@ -22,7 +22,7 @@ sources:
   votes:
     path: src/main/resources/lang/ru.yml
     prefix-key: prefix
-    exclude: [prefix, commands.vote-state-voted, commands.vote-state-open, reward.component-standard, reward.component-premium, reward.component-separator]
+    exclude: [prefix, commands.vote-state-voted, commands.vote-state-open, reward.component-standard, reward.component-premium, reward.component-spacing]
 
 placeholders:
   name: MonitoringMinecraft
@@ -37,7 +37,7 @@ placeholders:
   site: '<#ff5f56>HotMC</color>'
   fields: ': http.port'
   amount: '1000'
-  rewards: '<#4de3a2>+1000</color> <white>💰</white> <#ffc98c>·</color> <#ffd166>+3</color> <white></white>'
+  rewards: '<#4de3a2>+1000</color> <white>💰</white> <#ffd166>+3</color> <white></white>'
   mysql: '<#2bba43>✔ работает</color>'
   reward: '<#2bba43>✔ работает</color>'
   callback: '<#2bba43>✔ работает</color>'
