@@ -158,6 +158,41 @@ class MySqlVoteRepositoryIntegrationTest : FreeSpec({
             ledger.close()
         }
     }
+
+    "site history returns all-time counts with a bounded newest-first sample per monitoring" {
+        val player = NetworkPlayerName.of("HistoryPlayer")
+        listOf(
+            AuthenticatedVote(
+                MonitoringSource.HOTMC,
+                "site-history:hot:old",
+                player,
+                Instant.parse("2026-08-28T10:00:00Z"),
+            ),
+            AuthenticatedVote(
+                MonitoringSource.MINECRAFT_RATING,
+                "site-history:rating",
+                player,
+                Instant.parse("2026-08-29T10:00:00Z"),
+            ),
+            AuthenticatedVote(
+                MonitoringSource.HOTMC,
+                "site-history:hot:new",
+                player,
+                Instant.parse("2026-08-30T10:00:00Z"),
+            ),
+        ).forEach { repository.record(it, null).join().shouldBeInstanceOf<VoteRecordResult.Inserted>() }
+
+        repository.findSiteHistory(player, recentLimitPerSite = 1).join() shouldBe mapOf(
+            MonitoringSource.HOTMC to VoteSiteHistory(
+                totalVotes = 2,
+                recentVotes = listOf(Instant.parse("2026-08-30T10:00:00Z")),
+            ),
+            MonitoringSource.MINECRAFT_RATING to VoteSiteHistory(
+                totalVotes = 1,
+                recentVotes = listOf(Instant.parse("2026-08-29T10:00:00Z")),
+            ),
+        )
+    }
 })
 
 private fun Connection.insertOneTimeUse(

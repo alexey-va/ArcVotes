@@ -22,15 +22,22 @@ import java.util.Locale
 import java.util.logging.Level
 import java.util.logging.Logger
 
+fun interface VoteMenuOpener {
+    fun open(player: Player)
+}
+
 class VoteCommand(
     private val live: () -> VoteLiveConfiguration,
     private val tasks: LifecycleTaskScope,
     private val logger: Logger,
     private val history: VoteHistoryPageLookup? = null,
+    private val menu: VoteMenuOpener? = null,
 ) : CommandExecutor, TabCompleter {
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         when {
             args.isEmpty() -> showVoteList(sender)
+            args.size == 1 && args[0].equals("chat", ignoreCase = true) -> showVoteList(sender)
+            args.size == 1 && args[0].equals("gui", ignoreCase = true) && sender is Player && menu != null -> menu.open(sender)
             args.size == 1 && args[0].equals("status", ignoreCase = true) -> showServiceStatus(sender)
             args.size == 2 && args[0].equals("check", ignoreCase = true) -> showPlayerStatus(sender, args[1])
             args.size in 2..3 && args[0].equals("history", ignoreCase = true) -> {
@@ -48,6 +55,8 @@ class VoteCommand(
         args: Array<out String>,
     ): List<String> = when {
         args.size == 1 -> buildList {
+            add("chat")
+            if (sender is Player && menu != null) add("gui")
             if (sender.hasPermission(STATUS_PERMISSION)) add("status")
             if (sender.hasPermission(INSPECT_PERMISSION)) addAll(listOf("check", "history"))
         }.filter { it.startsWith(args[0], ignoreCase = true) }

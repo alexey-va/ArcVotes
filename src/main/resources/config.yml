@@ -69,6 +69,25 @@ status:
   history-page-size: 8
   history-maximum-pages: 1000
 
+gui:
+  # The bundled menu stays resource-pack neutral. On RusCrafting nodes set the
+  # background to GRAY_STAINED_GLASS_PANE with custom-model-data 11000
+  # (ItemsAdder arc:background).
+  history-entries-per-site: 5
+  background:
+    material: GRAY_STAINED_GLASS_PANE
+    custom-model-data: 0
+  sites:
+    minecraft-rating:
+      material: GOLD_INGOT
+      custom-model-data: 0
+    hotmc:
+      material: REDSTONE
+      custom-model-data: 0
+    monitoring-minecraft:
+      material: EMERALD
+      custom-model-data: 0
+
 monitorings:
   minecraft-rating:
     enabled: false

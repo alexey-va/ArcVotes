@@ -9,7 +9,7 @@ commands:
   vote:
     description: Open server voting links
     aliases: [votes, golos]
-    usage: /vote [status|check <player>|history <player> [page]]
+    usage: /vote [chat|gui|status|check <player>|history <player> [page]]
     permission: arcvotes.use
   arcvotes:
     description: Reload ArcVotes configuration

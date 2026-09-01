@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "0.3.6"
+version = "0.4.0"
 description = "Authenticated vote callbacks and idempotent rewards for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {

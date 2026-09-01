@@ -10,7 +10,7 @@ Handlers cap the body before parsing, reject duplicate fields and unsupported me
 
 `arc_votes_events` owns the normalized callback intent. `(source, external_id)` is unique, so provider retries are idempotent. `arc_votes_reward_components` snapshots every configured effect at callback time; existing pre-component rows retain their legacy Vault-only snapshot.
 
-The Paper `/vote` surface queries distinct callback sources by normalized player name and the configured calendar-day window. Its bounded TTL cache is read-only derived state; callback persistence remains the source of truth.
+The Paper `/vote` chat surface queries distinct callback sources by normalized player name and the configured provider window. Its bounded TTL cache is read-only derived state; callback persistence remains the source of truth. `/vote gui` uses one bounded asynchronous window query that returns each source's all-time count plus at most the configured number of newest timestamps. The menu opens in a loading state, applies results only while its exact holder remains current, and keeps Bukkit inventory work on the primary thread.
 
 Each Paper node periodically takes a main-thread snapshot of online names and issues one bounded asynchronous SQL query for their `PENDING` events. Per-player execution is serialized. Every reward component derives its own stable one-time-use identity before value mutation, so a committed standard deposit is not repeated while a premium component retries. Known pre-mutation failures release only that component claim; successful deposits commit it; unknown outcomes move the event to durable operator recovery.
 

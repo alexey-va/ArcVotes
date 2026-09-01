@@ -8,6 +8,11 @@ resource-pack:
   url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip
   sha256-url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip.sha256
 
+custom-items:
+  arc:background:
+    material: GRAY_STAINED_GLASS_PANE
+    model: assets/arc/models/gui/background.json
+
 glyphs:
   - character: '💰'
     path: '@pack/assets/arc/textures/glyphs/coin.png'
@@ -63,14 +68,81 @@ placeholders:
   history_state: '<#2bba43>✔ выдана</color>'
   previous: '<#92bed8><underlined>◀ Назад</underlined></color>'
   next: '<#92bed8><underlined>Вперёд ▶</underlined></color>'
+  total: '42'
 
 surfaces:
   fragments:
     - source: votes
-      include: [sites.*]
+      include: [sites.*, gui.site-*, gui.spacer]
 
   chat:
     - source: votes
       include:
         - commands.*
+        - gui.open-message
         - reward.granted
+
+  inventories:
+    - id: vote-sites-loading
+      title: votes:gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 11, material: CLOCK, name: votes:gui.loading-name, lore: votes:gui.loading-lore, placeholders: {site: '<#ffc857>MinecraftRating'}}
+        - {slot: 13, material: CLOCK, name: votes:gui.loading-name, lore: votes:gui.loading-lore, placeholders: {site: '<#ff5f56>HotMC'}}
+        - {slot: 15, material: CLOCK, name: votes:gui.loading-name, lore: votes:gui.loading-lore, placeholders: {site: '<#43d995>MonitoringMinecraft'}}
+
+    - id: vote-sites-history
+      title: votes:gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - slot: 11
+          material: GOLD_INGOT
+          name: votes:sites.minecraft-rating
+          placeholders: {name: MinecraftRating}
+          lore:
+            - votes:gui.site-status-voted
+            - {ref: votes:gui.site-total, placeholders: {total: '42'}}
+            - votes:gui.spacer
+            - votes:gui.site-history-title
+            - {ref: votes:gui.site-history-row, placeholders: {date: '31.08.2026 в 15:17'}}
+            - {ref: votes:gui.site-history-row, placeholders: {date: '30.08.2026 в 23:10'}}
+            - votes:gui.spacer
+            - votes:gui.site-action
+        - slot: 13
+          material: REDSTONE
+          name: votes:sites.hotmc
+          placeholders: {name: HotMC}
+          lore:
+            - votes:gui.site-status-open
+            - {ref: votes:gui.site-total, placeholders: {total: '0'}}
+            - votes:gui.spacer
+            - votes:gui.site-history-title
+            - votes:gui.site-history-empty
+            - votes:gui.spacer
+            - votes:gui.site-action
+        - slot: 15
+          material: EMERALD
+          name: votes:sites.monitoring-minecraft
+          placeholders: {name: MonitoringMinecraft}
+          lore:
+            - votes:gui.site-status-voted
+            - {ref: votes:gui.site-total, placeholders: {total: '7'}}
+            - votes:gui.spacer
+            - votes:gui.site-history-title
+            - {ref: votes:gui.site-history-row, placeholders: {date: '29.08.2026 в 11:05'}}
+            - votes:gui.spacer
+            - votes:gui.site-action
+
+    - id: vote-sites-history-unavailable
+      title: votes:gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - {slot: 11, material: GOLD_INGOT, name: votes:sites.minecraft-rating, lore: [votes:gui.site-history-unavailable, votes:gui.spacer, votes:gui.site-action], placeholders: {name: MinecraftRating}}
+        - {slot: 13, material: REDSTONE, name: votes:sites.hotmc, lore: [votes:gui.site-history-unavailable, votes:gui.spacer, votes:gui.site-action], placeholders: {name: HotMC}}
+        - {slot: 15, material: EMERALD, name: votes:sites.monitoring-minecraft, lore: [votes:gui.site-history-unavailable, votes:gui.spacer, votes:gui.site-action], placeholders: {name: MonitoringMinecraft}}

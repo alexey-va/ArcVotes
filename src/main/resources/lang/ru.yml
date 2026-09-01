@@ -7,10 +7,10 @@ sites:
 commands:
   vote-suggestions:
     - '<reset>'
-    - '<prefix> <#fff4e3>Поддержите сервер на трёх сайтах:</#fff4e3>'
-    - '<minecraft_rating_state> <minecraft_rating> <#ffe0bd>— открыть</#ffe0bd>'
-    - '<hotmc_state> <hotmc> <#ffe0bd>— открыть</#ffe0bd>'
-    - '<monitoring_minecraft_state> <monitoring_minecraft> <#ffe0bd>— открыть</#ffe0bd>'
+    - '<prefix> <#fff4e3>Поддержите сервер на трёх сайтах:'
+    - '<minecraft_rating_state> <minecraft_rating> <#ffe0bd>— открыть'
+    - '<hotmc_state> <hotmc> <#ffe0bd>— открыть'
+    - '<monitoring_minecraft_state> <monitoring_minecraft> <#ffe0bd>— открыть'
     - '<reset>'
   reward-note: |-
     <#ffd9b3>На сайте укажите свой игровой ник.</color>
@@ -19,9 +19,10 @@ commands:
   vote-state-open: '<#ffc98c>◇</color>'
   open-hint: '<#fff4e3>Нажмите, чтобы открыть <site></color>'
   no-permission: '<prefix> <#ff8f7a>Недостаточно прав.</color>'
-  help: '<prefix> <#fff4e3>Использование:</color> <#ffcf70>/vote</color>'
+  help: '<prefix> <#fff4e3>Открыть ссылки:</color> <#ffcf70>/vote</color> <#8c8c8c>или</color> <#ffcf70>/vote gui</color>'
   admin-help:
     - '<prefix> <#e6fff3>Команды администратора</color>'
+    - '  <#92bed8>/vote</color> <#8c8c8c>·</color> <#92bed8>/vote gui</color>'
     - '  <#92bed8>/vote status</color> <#8c8c8c>·</color> <#92bed8>/vote check ник</color>'
     - '  <#92bed8>/vote history ник [страница]</color>'
   state-enabled: '<#2bba43>✔ работает</color>'
@@ -71,6 +72,21 @@ commands:
   lookup-failed: '<prefix> <#c42323>Не удалось прочитать голоса.</color>'
   page-invalid: '<prefix> <#c42323>Страница должна быть от 1 до <maximum>.</color>'
   page-not-found: '<prefix> <#c42323>Такой страницы нет.</color> <#969696>Всего: <pages>.</color>'
+gui:
+  title: '<#ffb86b><bold>Голосования'
+  loading-name: '<italic:false><#92bed8><bold><site>'
+  loading-lore:
+    - '<italic:false><#e6fff3>Загружаем вашу историю голосов.'
+  site-status-voted: '<italic:false><#2bba43>✔ Недавний голос засчитан'
+  site-status-open: '<italic:false><#ff9f0f>◇ Можно голосовать'
+  site-total: '<italic:false><#8c8c8c>Всего голосов: <#92bed8><total>'
+  site-history-title: '<italic:false><#e6fff3><bold>Последние голоса:'
+  site-history-row: '<italic:false><#8c8c8c>• <#969696><date>'
+  site-history-empty: '<italic:false><#969696>Вы ещё не голосовали на этом сайте.'
+  site-history-unavailable: '<italic:false><#c42323>История голосов сейчас недоступна.'
+  site-action: '<italic:false><#666666>• <#92bed8>Нажмите<#e6fff3> — ссылка появится в чате <#666666>•'
+  spacer: '<italic:false>'
+  open-message: '<prefix> <#e6fff3>Ссылка для голосования: <site>'
 reward:
   granted:
     - '<prefix> <#fff4e3>Голос на <site> засчитан.</color>'

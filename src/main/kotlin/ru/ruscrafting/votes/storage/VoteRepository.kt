@@ -60,10 +60,28 @@ fun interface VoteHistoryPageLookup {
     ): CompletableFuture<VoteHistoryPage>
 }
 
+data class VoteSiteHistory(
+    val totalVotes: Long,
+    val recentVotes: List<Instant>,
+) {
+    init {
+        require(totalVotes >= 0) { "Vote count cannot be negative" }
+        require(recentVotes.size.toLong() <= totalVotes) { "Recent votes cannot exceed total votes" }
+    }
+}
+
+fun interface VoteSiteHistoryLookup {
+    /** Returns all-time counts and one bounded newest-first sample for each source. */
+    fun findSiteHistory(
+        playerName: NetworkPlayerName,
+        recentLimitPerSite: Int,
+    ): CompletableFuture<Map<MonitoringSource, VoteSiteHistory>>
+}
+
 class MySqlVoteRepository(
     private val runtime: SqlRuntime,
     private val clock: Clock = Clock.systemUTC(),
-) : VoteRepository, VoteHistoryLookup, VoteHistoryPageLookup {
+) : VoteRepository, VoteHistoryLookup, VoteHistoryPageLookup, VoteSiteHistoryLookup {
     override fun initialize(): CompletableFuture<Unit> = runtime.executor
         .submit { MySqlMigrator(runtime.dataSource, MIGRATION_NAMESPACE).migrate(VoteMigrations.ALL) }
         .thenApply { Unit }
@@ -259,6 +277,56 @@ class MySqlVoteRepository(
         }
     }
 
+    override fun findSiteHistory(
+        playerName: NetworkPlayerName,
+        recentLimitPerSite: Int,
+    ): CompletableFuture<Map<MonitoringSource, VoteSiteHistory>> {
+        require(recentLimitPerSite in 1..MAXIMUM_SITE_HISTORY_ENTRIES) {
+            "Recent site history limit must be between 1 and $MAXIMUM_SITE_HISTORY_ENTRIES"
+        }
+        val normalized = playerName.value.lowercase(Locale.ROOT)
+        return runtime.executor.read { connection ->
+            connection.prepareStatement(
+                """
+                SELECT `ranked`.`source`, `ranked`.`occurred_at`, `ranked`.`total_votes`
+                FROM (
+                    SELECT `source`, `occurred_at`, `event_uuid`,
+                           COUNT(*) OVER (PARTITION BY `source`) AS `total_votes`,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY `source`
+                               ORDER BY `occurred_at` DESC, `event_uuid` DESC
+                           ) AS `recent_rank`
+                    FROM `arc_votes_events`
+                    WHERE `player_name_normalized` = ?
+                ) AS `ranked`
+                WHERE `ranked`.`recent_rank` <= ?
+                ORDER BY `ranked`.`source` ASC, `ranked`.`occurred_at` DESC, `ranked`.`event_uuid` DESC
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, normalized)
+                statement.setInt(2, recentLimitPerSite)
+                statement.executeQuery().use { rows ->
+                    val totals = linkedMapOf<MonitoringSource, Long>()
+                    val recent = linkedMapOf<MonitoringSource, MutableList<Instant>>()
+                    while (rows.next()) {
+                        val sourceKey = rows.getString("source")
+                        val source = MonitoringSource.entries.singleOrNull { it.configKey == sourceKey }
+                            ?: error("Unknown stored vote source")
+                        val totalVotes = rows.getLong("total_votes")
+                        val previousTotal = totals.putIfAbsent(source, totalVotes)
+                        check(previousTotal == null || previousTotal == totalVotes) {
+                            "Vote history total changed inside one result set"
+                        }
+                        recent.getOrPut(source, ::mutableListOf) += rows.getTimestamp("occurred_at").toInstant()
+                    }
+                    recent.mapValues { (source, votes) ->
+                        VoteSiteHistory(requireNotNull(totals[source]), votes.toList())
+                    }
+                }
+            }
+        }
+    }
+
     override fun markGranted(eventId: UUID, playerId: UUID): CompletableFuture<Boolean> = runtime.executor.write { connection ->
         connection.prepareStatement(
             """
@@ -413,6 +481,7 @@ class MySqlVoteRepository(
         const val MAXIMUM_PLAYER_BATCH = 500
         const val MAXIMUM_HISTORY_PAGE_SIZE = 20
         const val MAXIMUM_HISTORY_PAGES = 1_000
+        const val MAXIMUM_SITE_HISTORY_ENTRIES = 8
         const val MYSQL_DUPLICATE_KEY = 1062
         const val SQL_STATE_INTEGRITY_CONSTRAINT = "23000"
         val MAXIMUM_HISTORY_WINDOW: Duration = Duration.ofHours(26)

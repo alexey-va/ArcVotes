@@ -81,6 +81,7 @@ class VoteCommandTest : StringSpec({
         val rendered = messages.joinToString("\n") { plain.serialize(it) }
         rendered.contains("GameMonitoring") shouldBe false
         rendered.contains("</color>") shouldBe false
+        Regex("</#[0-9A-Fa-f]{6}>").containsMatchIn(rendered) shouldBe false
 
         messages.clear()
         every { sender.hasPermission("arcvotes.admin.status") } returns true
@@ -134,6 +135,41 @@ class VoteCommandTest : StringSpec({
         val plain = messages.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
         plain.count { it == '✔' } shouldBe 2
         plain.count { it == '◇' } shouldBe 1
+    }
+
+    "vote keeps chat as the default and opens the chest menu only on the gui route" {
+        val root = Files.createTempDirectory("arcvotes-command-mode")
+        val settings = ArcVotesSettings.load(root) { null }
+        val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
+        val player = mockk<Player>(relaxed = true)
+        val command = mockk<Command>(relaxed = true)
+        val messages = mutableListOf<Component>()
+        var menuOpens = 0
+        every { player.name } returns "Steve"
+        every { player.isOnline } returns true
+        every { player.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
+        val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
+        val vote = VoteCommand(
+            live::current,
+            LifecycleTaskScope(TestTaskScheduler()),
+            Logger.getAnonymousLogger(),
+            menu = VoteMenuOpener { menuOpens++ },
+        )
+
+        vote.onCommand(player, command, "vote", emptyArray()) shouldBe true
+        messages shouldHaveSize 6
+        menuOpens shouldBe 0
+
+        messages.clear()
+        vote.onCommand(player, command, "vote", arrayOf("chat")) shouldBe true
+        messages shouldHaveSize 6
+        menuOpens shouldBe 0
+
+        messages.clear()
+        vote.onCommand(player, command, "vote", arrayOf("gui")) shouldBe true
+        messages shouldHaveSize 0
+        menuOpens shouldBe 1
+        vote.onTabComplete(player, command, "vote", arrayOf("")) shouldBe listOf("chat", "gui")
     }
 
     "an in-flight vote command renders one captured configuration generation" {

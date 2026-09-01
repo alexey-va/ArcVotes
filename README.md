@@ -2,7 +2,7 @@
 
 Small Paper plugin for RusCrafting vote links, authenticated monitoring callbacks, durable deduplication, and configurable Vault plus RedisEconomy rewards.
 
-`/vote` reads accepted callbacks and marks the three currently suggested monitorings while that provider still considers the vote active, keeping every shown destination clickable. GameMonitoring remains accepted and queryable through the callback, history, and administrator check paths, but is intentionally hidden from the public suggestion list. [MinecraftRating](https://minecraftrating.ru/faq.html) and [MonitoringMinecraft](https://monitoringminecraft.com/promote/) document rolling 24-hour windows, while [GameMonitoring](https://gamemonitoring.ru/minecraft/servers/14210383/vote) documents 12 hours. [HotMC](https://hotmc.ru/vote-242482) says one vote per day; observed availability establishes its day boundary at 00:00 UTC (03:00 Europe/Moscow).
+`/vote` keeps the compact clickable chat list as the default. `/vote chat` opens the same list explicitly, while `/vote gui` opens a three-row chest menu. Each public monitoring card shows whether the latest vote is still active, the player's all-time vote count on that site, and up to five newest vote timestamps; clicking a card sends its safe clickable URL to chat. GameMonitoring remains accepted and queryable through the callback, history, and administrator check paths, but is intentionally hidden from both public surfaces. [MinecraftRating](https://minecraftrating.ru/faq.html) and [MonitoringMinecraft](https://monitoringminecraft.com/promote/) document rolling 24-hour windows, while [GameMonitoring](https://gamemonitoring.ru/minecraft/servers/14210383/vote) documents 12 hours. [HotMC](https://hotmc.ru/vote-242482) says one vote per day; observed availability establishes its day boundary at 00:00 UTC (03:00 Europe/Moscow).
 
 Administrators can use `/vote check <player>` for the same cached provider-specific view and `/vote history <player> [page]` for a newest-first MySQL history with reward state. `/vote status` reports only observable service health without exposing callback topology. History page size and the maximum accepted page number are live settings under `status`.
 
@@ -23,7 +23,9 @@ Paper reconciles pending rewards for online players every five seconds by defaul
 
 Run `/arcvotes reload` with `arcvotes.admin.reload` after editing `config.yml`, `lang/ru.yml`, `lang/en.yml`, or the plugin-local `.env`. ArcVotes reads and validates an isolated candidate first and publishes the complete generation atomically; an invalid candidate leaves the current settings, callback ingress, and reward delivery active.
 
-Live settings include locale selection and messages, monitoring enablement/presentation/authentication/network policy, reward enablement/components/amounts/currency/limits, vote-status cache settings, GameMonitoring HTTP limits, and the callback body/header/persistence/forwarded-address policy. Callback counters and in-flight requests survive reloads. Pending rows retain their original reward bundle, including a historical premium currency id.
+Live settings include locale selection and messages, monitoring enablement/presentation/authentication/network policy, reward enablement/components/amounts/currency/limits, vote-status cache settings, GUI history depth and item visuals, GameMonitoring HTTP limits, and the callback body/header/persistence/forwarded-address policy. Callback counters and in-flight requests survive reloads. Pending rows retain their original reward bundle, including a historical premium currency id.
+
+The bundled GUI uses resource-pack-neutral vanilla items. RusCrafting runtime profiles should set `gui.background` to `GRAY_STAINED_GLASS_PANE` with custom model data `11000`, the verified `arc:background` asset. Unknown configured materials fall back to the bundled role material with one actionable warning.
 
 `server-id` and every `mysql` field require a plugin/server restart. While the HTTP listener remains enabled, `http.bind-address`, `http.port`, `http.worker-threads`, and `http.queue-capacity` also require a restart. Those four listener fields can instead be changed live in two reloads: disable `http.enabled`, reload, edit/re-enable, then reload again. Enabling callbacks or rewards live still requires MySQL to have been initialized at startup and the required Vault/RedisEconomy providers to be available.
 
@@ -37,4 +39,4 @@ Tracked YAML contains environment-variable names only. Set the variables named i
 ./gradlew --no-daemon clean test shadowJar -ParcCoreDir=../arc-core
 ```
 
-The packaged plugin is `build/libs/ArcVotes-0.3.6.jar`. MySQL integration tests run in CI, not in the local lane.
+The packaged plugin is `build/libs/ArcVotes-0.4.0.jar`. MySQL integration tests run in CI, not in the local lane.
