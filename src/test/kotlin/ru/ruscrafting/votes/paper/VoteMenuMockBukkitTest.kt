@@ -88,6 +88,7 @@ class VoteMenuMockBukkitTest : StringSpec({
             paper.performTicks(1)
 
             val inventory = player.openInventory.topInventory
+            (inventory === loading) shouldBe true
             inventory.size shouldBe loading.size
             inventory.getItem(siteSlots(menuConfiguration).getValue(MonitoringSource.MINECRAFT_RATING))?.type shouldBe
                 Material.GOLD_INGOT
