@@ -40,11 +40,6 @@ class ArcVotesSettingsTest : StringSpec({
         settings.status.historyPageSize shouldBe 8
         settings.status.historyMaximumPages shouldBe 1000
         settings.gui.historyEntriesPerSite shouldBe 5
-        settings.gui.background.material shouldBe "GRAY_STAINED_GLASS_PANE"
-        settings.gui.background.customModelData shouldBe 0
-        settings.gui.sites.getValue(MonitoringSource.MINECRAFT_RATING).material shouldBe "GOLD_INGOT"
-        settings.gui.sites.getValue(MonitoringSource.HOTMC).material shouldBe "REDSTONE"
-        settings.gui.sites.getValue(MonitoringSource.MONITORING_MINECRAFT).material shouldBe "EMERALD"
         settings.presentations.getValue(MonitoringSource.HOTMC).voteUrl shouldBe
             URI("https://hotmc.ru/vote-242482")
         settings.presentations.getValue(MonitoringSource.MONITORING_MINECRAFT).voteUrl shouldBe

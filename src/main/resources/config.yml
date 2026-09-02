@@ -70,14 +70,27 @@ status:
   history-maximum-pages: 1000
 
 gui:
-  # The bundled menu stays resource-pack neutral. On RusCrafting nodes set the
-  # background to GRAY_STAINED_GLASS_PANE with custom-model-data 11000
-  # (ItemsAdder arc:background).
+  # Layout and safe item presentation are live-reloadable. Semantic element
+  # names are stable because ArcVotes owns their actions.
   history-entries-per-site: 5
-  background:
-    material: GRAY_STAINED_GLASS_PANE
-    custom-model-data: 0
-  sites:
+  layouts:
+    vote:
+      schema-version: 1
+      rows: 3
+      background: { template: background }
+      elements:
+        minecraft-rating: { slot: 11, template: minecraft-rating }
+        hotmc: { slot: 13, template: hotmc }
+        monitoring-minecraft: { slot: 15, template: monitoring-minecraft }
+  templates:
+    # On RusCrafting nodes custom-model-data may point at the canonical GUI
+    # background while keeping this vanilla fallback safe.
+    background:
+      material: GRAY_STAINED_GLASS_PANE
+      custom-model-data: 0
+      hide-tooltip: true
+    loading:
+      material: CLOCK
     minecraft-rating:
       material: GOLD_INGOT
       custom-model-data: 0

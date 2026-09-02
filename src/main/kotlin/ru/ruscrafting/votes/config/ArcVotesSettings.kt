@@ -2,6 +2,9 @@ package ru.ruscrafting.votes.config
 
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
+import ru.arc.menu.MenuContract
+import ru.arc.menu.MenuElementId
+import ru.arc.menu.MenuId
 import ru.arc.sql.SqlConnectionConfig
 import ru.arc.sql.SqlSslMode
 import ru.ruscrafting.votes.domain.RewardProvider
@@ -189,25 +192,22 @@ data class StatusSettings(
     }
 }
 
-data class GuiItemSpec(
-    val material: String,
-    val customModelData: Int = 0,
-) {
-    init {
-        require(material.matches(Regex("[A-Z0-9_]{1,64}"))) { "GUI material name is invalid" }
-        require(customModelData in 0..16_777_216) { "GUI custom-model-data must be between 0 and 16777216" }
-    }
-}
-
 data class VoteGuiSettings(
     val historyEntriesPerSite: Int,
-    val background: GuiItemSpec,
-    val sites: Map<MonitoringSource, GuiItemSpec>,
 ) {
     init {
         require(historyEntriesPerSite in 1..8) { "gui.history-entries-per-site must be between 1 and 8" }
-        require(sites.keys == PUBLIC_MONITORING_SOURCES) { "GUI site items must cover every public monitoring" }
     }
+}
+
+object VoteMenuSchema {
+    val menuId: MenuId = MenuId.of("vote")
+    val elements: Map<MonitoringSource, MenuElementId> = PUBLIC_MONITORING_SOURCES.associateWith {
+        MenuElementId.of(it.configKey)
+    }
+    val contracts: Map<MenuId, MenuContract> = mapOf(
+        menuId to MenuContract(requiredElements = elements.values.toSet()),
+    )
 }
 
 val PUBLIC_MONITORING_SOURCES: Set<MonitoringSource> = setOf(
@@ -322,10 +322,6 @@ data class ArcVotesSettings(
                 ),
                 gui = VoteGuiSettings(
                     historyEntriesPerSite = config.int("gui.history-entries-per-site", 5),
-                    background = guiItem(config, "gui.background"),
-                    sites = PUBLIC_MONITORING_SOURCES.associateWith { source ->
-                        guiItem(config, "gui.sites.${source.configKey}")
-                    },
                 ),
                 minecraftRating = loadSignedForm(config, secrets, MonitoringSource.MINECRAFT_RATING),
                 hotMc = loadSignedForm(config, secrets, MonitoringSource.HOTMC),
@@ -417,11 +413,6 @@ data class ArcVotesSettings(
             displayName = config.string("$prefix.display-name").trim(),
             voteUrl = URI(config.string("$prefix.vote-url").trim()),
         )
-
-        private fun guiItem(config: Config, path: String): GuiItemSpec {
-            val rawMaterial = config.string("$path.material").trim()
-            return GuiItemSpec(rawMaterial.uppercase(Locale.ROOT), config.int("$path.custom-model-data", 0))
-        }
 
         private fun networkPolicy(config: Config, prefix: String): NetworkSourcePolicy = NetworkSourcePolicy(
             enforceIpAllowlist = config.boolean("$prefix.enforce-ip-allowlist"),

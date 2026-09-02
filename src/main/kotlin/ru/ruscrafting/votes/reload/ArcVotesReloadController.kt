@@ -14,6 +14,7 @@ import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.storage.VoteHistoryLookup
 import ru.ruscrafting.votes.storage.VoteRepository
 import ru.ruscrafting.votes.text.VoteLocale
+import ru.ruscrafting.votes.paper.VoteMenuConfiguration
 import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
@@ -44,6 +45,8 @@ class ArcVotesReloadController(
     private val rewardRuntimeFactory: VoteRewardRuntimeFactory,
     private val logger: Logger,
     private val ingressCounters: VoteIngressCounters = VoteIngressCounters(),
+    private val loadMenuCandidate: (() -> VoteMenuConfiguration)? = null,
+    private val applyMenuCandidate: (VoteMenuConfiguration) -> Unit = {},
 ) : ArcVotesReloader, AutoCloseable {
     private val monitor = Any()
     private val reloadInProgress = AtomicBoolean(false)
@@ -96,6 +99,7 @@ class ArcVotesReloadController(
         ).also(VoteLocale::validate)
         val restartRequired = restartRequiredFields(current.settings, settings)
         if (restartRequired.isNotEmpty()) return ArcVotesReloadResult.RestartRequired(restartRequired)
+        val menuCandidate = loadMenuCandidate?.invoke()
 
         val rewardRuntime = rewardRuntimeFactory.create(settings)
         val dailyStatus = history?.let {
@@ -131,6 +135,7 @@ class ArcVotesReloadController(
                 preparedHttp = createHttpServer(settings).also(ArcVoteHttpServer::start)
             }
             rewardService?.reconfigurePolling()
+            menuCandidate?.let(applyMenuCandidate)
             live.publish(candidate)
 
             if (preparedHttp != null) {

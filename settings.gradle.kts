@@ -10,7 +10,9 @@ providers.gradleProperty("arcCoreDir").orNull?.let(::file)?.let { arcCoreDir ->
                 "arc-core",
                 "arc-core-integration-testing",
                 "arc-core-logging",
+                "arc-core-menu",
                 "arc-core-paper",
+                "arc-core-paper-menu",
                 "arc-core-paper-testing",
                 "arc-core-sql",
             ).forEach { artifact ->

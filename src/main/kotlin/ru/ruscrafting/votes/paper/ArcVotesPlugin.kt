@@ -3,6 +3,7 @@ package ru.ruscrafting.votes.paper
 import net.milkbowl.vault.economy.Economy
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.config.ConfigManager
+import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.PaperArcRuntime
 import ru.arc.core.Tasks
 import ru.arc.logging.ArcLogging
@@ -11,10 +12,12 @@ import ru.arc.logging.LoggingModuleConfig
 import ru.arc.logging.LokiAttachTarget
 import ru.arc.logging.LokiInstallSpec
 import ru.arc.logging.paper.PaperLoggingPlatform
+import ru.arc.menu.MenuCatalogRepository
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.observability.StructuredDebugLine
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.menu.PaperMenuService
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.onetime.MySqlOneTimeUseLedger
 import ru.arc.sql.onetime.MySqlOneTimeUsePartition
@@ -125,6 +128,12 @@ class ArcVotesPlugin : JavaPlugin() {
             }
             live.publish(live.current().copy(ingress = ingress))
 
+            var menuConfiguration = VoteMenuConfiguration.load(dataPath)
+            val menuCatalogs = MenuCatalogRepository(menuConfiguration.catalog)
+            val menuService = runtime.own(
+                PaperMenuService(this, menuCatalogs, BukkitTaskScheduler(this)),
+            )
+
             val reloadController = runtime.own(
                 ArcVotesReloadController(
                     dataRoot = dataPath,
@@ -135,12 +144,23 @@ class ArcVotesPlugin : JavaPlugin() {
                     rewardRuntimeFactory = rewardRuntimeFactory,
                     logger = logger,
                     ingressCounters = ingressCounters,
+                    loadMenuCandidate = { VoteMenuConfiguration.loadFresh(dataPath) },
+                    applyMenuCandidate = { candidate ->
+                        menuCatalogs.replace(candidate.catalog)
+                        menuConfiguration = candidate
+                        menuService.closeSessions()
+                    },
                 ),
             ).also(ArcVotesReloadController::startInitialHttp)
 
-            val voteMenu = VoteMenu(live::current, runtime.tasks, logger, repository).also {
-                server.pluginManager.registerEvents(it, this)
-            }
+            val voteMenu = VoteMenu(
+                live::current,
+                runtime.tasks,
+                logger,
+                repository,
+                menuService,
+                { menuConfiguration },
+            )
             val voteCommand = VoteCommand(live::current, runtime.tasks, logger, repository, voteMenu)
             requireNotNull(getCommand("vote")).apply {
                 setExecutor(voteCommand)

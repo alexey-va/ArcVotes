@@ -19,9 +19,12 @@ import org.bukkit.inventory.ItemStack
 import ru.arc.config.ConfigManager
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.menu.MenuCatalogRepository
+import ru.arc.paper.menu.PaperMenuService
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.MonitoringSource
+import ru.ruscrafting.votes.config.VoteMenuSchema
 import ru.ruscrafting.votes.live.VoteLiveConfiguration
 import ru.ruscrafting.votes.live.VoteLiveState
 import ru.ruscrafting.votes.storage.VoteSiteHistory
@@ -31,6 +34,8 @@ import java.nio.file.Files
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
 import java.util.logging.Logger
+import kotlin.io.path.readText
+import kotlin.io.path.writeText
 
 class VoteMenuMockBukkitTest : StringSpec({
     afterTest { ConfigManager.clear() }
@@ -41,6 +46,7 @@ class VoteMenuMockBukkitTest : StringSpec({
             val player = paper.addPlayer("VoteTester")
             val root = Files.createTempDirectory("arcvotes-menu")
             val settings = ArcVotesSettings.load(root) { null }
+            val menuConfiguration = VoteMenuConfiguration.load(root)
             val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
             val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
             val result = CompletableFuture<Map<MonitoringSource, VoteSiteHistory>>()
@@ -50,15 +56,15 @@ class VoteMenuMockBukkitTest : StringSpec({
                 result
             }
             val tasks = LifecycleTaskScope(BukkitTaskScheduler(plugin))
-            val menu = VoteMenu(live::current, tasks, Logger.getAnonymousLogger(), lookup)
-            paper.server.pluginManager.registerEvents(menu, plugin)
+            val menus = PaperMenuService(plugin, MenuCatalogRepository(menuConfiguration.catalog), BukkitTaskScheduler(plugin))
+            val menu = VoteMenu(live::current, tasks, Logger.getAnonymousLogger(), lookup, menus, { menuConfiguration })
 
             menu.open(player)
 
             val loading = player.openInventory.topInventory
             loading.size shouldBe 27
             requestedLimit shouldBe 5
-            VoteMenu.SITE_SLOTS.values.forEach { slot ->
+            siteSlots(menuConfiguration).values.forEach { slot ->
                 loading.getItem(slot)?.type shouldBe Material.CLOCK
             }
             loading.assertVisibleComponentsAreNonItalic()
@@ -82,19 +88,20 @@ class VoteMenuMockBukkitTest : StringSpec({
             paper.performTicks(1)
 
             val inventory = player.openInventory.topInventory
-            inventory shouldBe loading
-            inventory.getItem(VoteMenu.SITE_SLOTS.getValue(MonitoringSource.MINECRAFT_RATING))?.type shouldBe
+            inventory.size shouldBe loading.size
+            inventory.getItem(siteSlots(menuConfiguration).getValue(MonitoringSource.MINECRAFT_RATING))?.type shouldBe
                 Material.GOLD_INGOT
-            inventory.getItem(VoteMenu.SITE_SLOTS.getValue(MonitoringSource.HOTMC))?.type shouldBe Material.REDSTONE
-            inventory.getItem(VoteMenu.SITE_SLOTS.getValue(MonitoringSource.MONITORING_MINECRAFT))?.type shouldBe
+            inventory.getItem(siteSlots(menuConfiguration).getValue(MonitoringSource.HOTMC))?.type shouldBe Material.REDSTONE
+            inventory.getItem(siteSlots(menuConfiguration).getValue(MonitoringSource.MONITORING_MINECRAFT))?.type shouldBe
                 Material.EMERALD
             inventory.assertVisibleComponentsAreNonItalic()
-            val ratingLore = inventory.getItem(VoteMenu.SITE_SLOTS.getValue(MonitoringSource.MINECRAFT_RATING)).plainLore()
+            val ratingLore = inventory.getItem(siteSlots(menuConfiguration).getValue(MonitoringSource.MINECRAFT_RATING)).plainLore()
             ratingLore.joinToString("\n") shouldContain "Всего голосов: 42"
             ratingLore.joinToString("\n") shouldContain "31.08.2026 в 15:17"
             ratingLore.joinToString("\n") shouldContain "30.08.2026 в 23:10"
-            inventory.getItem(VoteMenu.SITE_SLOTS.getValue(MonitoringSource.HOTMC)).plainLore()
+            inventory.getItem(siteSlots(menuConfiguration).getValue(MonitoringSource.HOTMC)).plainLore()
                 .joinToString("\n") shouldContain "Вы ещё не голосовали на этом сайте."
+            menus.close()
             tasks.close()
         }
     }
@@ -105,21 +112,24 @@ class VoteMenuMockBukkitTest : StringSpec({
             val player = paper.addPlayer("VoteClicker")
             val root = Files.createTempDirectory("arcvotes-menu-click")
             val settings = ArcVotesSettings.load(root) { null }
+            val menuConfiguration = VoteMenuConfiguration.load(root)
             val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
             val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
             val tasks = LifecycleTaskScope(BukkitTaskScheduler(plugin))
+            val menus = PaperMenuService(plugin, MenuCatalogRepository(menuConfiguration.catalog), BukkitTaskScheduler(plugin))
             val menu = VoteMenu(
                 live::current,
                 tasks,
                 Logger.getAnonymousLogger(),
                 VoteSiteHistoryLookup { _, _ -> CompletableFuture.completedFuture(emptyMap()) },
+                menus,
+                { menuConfiguration },
             )
-            paper.server.pluginManager.registerEvents(menu, plugin)
             menu.open(player)
             paper.performTicks(1)
 
             click(paper, player, 0).isCancelled shouldBe true
-            click(paper, player, VoteMenu.SITE_SLOTS.getValue(MonitoringSource.HOTMC)).isCancelled shouldBe true
+            click(paper, player, siteSlots(menuConfiguration).getValue(MonitoringSource.HOTMC)).isCancelled shouldBe true
             val message = requireNotNull(player.nextComponentMessage())
             PlainTextComponentSerializer.plainText().serialize(message) shouldContain "HotMC"
             message.descendantsAndSelf().mapNotNull(Component::clickEvent) shouldBe listOf(
@@ -139,6 +149,7 @@ class VoteMenuMockBukkitTest : StringSpec({
             val unrelated = paper.server.createInventory(null, 9, Component.text("Unrelated"))
             player.openInventory(unrelated)
             click(paper, player, 0).isCancelled shouldBe false
+            menus.close()
             tasks.close()
         }
     }
@@ -149,17 +160,20 @@ class VoteMenuMockBukkitTest : StringSpec({
             val player = paper.addPlayer("VoteStale")
             val root = Files.createTempDirectory("arcvotes-menu-stale")
             val settings = ArcVotesSettings.load(root) { null }
+            val menuConfiguration = VoteMenuConfiguration.load(root)
             val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
             val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
             val result = CompletableFuture<Map<MonitoringSource, VoteSiteHistory>>()
             val tasks = LifecycleTaskScope(BukkitTaskScheduler(plugin))
+            val menus = PaperMenuService(plugin, MenuCatalogRepository(menuConfiguration.catalog), BukkitTaskScheduler(plugin))
             val menu = VoteMenu(
                 live::current,
                 tasks,
                 Logger.getAnonymousLogger(),
                 VoteSiteHistoryLookup { _, _ -> result },
+                menus,
+                { menuConfiguration },
             )
-            paper.server.pluginManager.registerEvents(menu, plugin)
             menu.open(player)
             val unrelated = paper.server.createInventory(null, 9, Component.text("Safe destination"))
             player.openInventory(unrelated)
@@ -168,10 +182,48 @@ class VoteMenuMockBukkitTest : StringSpec({
             paper.performTicks(1)
 
             player.openInventory.topInventory shouldBe unrelated
+            menus.close()
+            tasks.close()
+        }
+    }
+
+    "layout and background changes move the semantic action without code changes" {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("ArcVotesConfiguredMenuTest")
+            val player = paper.addPlayer("VoteLayout")
+            val root = Files.createTempDirectory("arcvotes-menu-layout")
+            ArcVotesSettings.load(root) { null }
+            root.resolve("config.yml").writeText(
+                root.resolve("config.yml").readText()
+                    .replace("hotmc: { slot: 13, template: hotmc }", "hotmc: { slot: 10, template: hotmc }")
+                    .replace("material: GRAY_STAINED_GLASS_PANE", "material: BLUE_STAINED_GLASS_PANE"),
+            )
+            val settings = ArcVotesSettings.loadFresh(root) { null }
+            val menuConfiguration = VoteMenuConfiguration.loadFresh(root)
+            val locale = VoteLocale(root, { settings.defaultLocale }, { settings.useClientLocale })
+            val live = VoteLiveState(VoteLiveConfiguration(settings, locale, null, null, null, false, false))
+            val tasks = LifecycleTaskScope(BukkitTaskScheduler(plugin))
+            val menus = PaperMenuService(plugin, MenuCatalogRepository(menuConfiguration.catalog), BukkitTaskScheduler(plugin))
+            val menu = VoteMenu(live::current, tasks, Logger.getAnonymousLogger(), null, menus, { menuConfiguration })
+
+            menu.open(player)
+
+            player.openInventory.topInventory.getItem(13)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
+            player.openInventory.topInventory.getItem(10)?.type shouldBe Material.REDSTONE
+            click(paper, player, 13).isCancelled shouldBe true
+            player.nextComponentMessage() shouldBe null
+            click(paper, player, 10).isCancelled shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(requireNotNull(player.nextComponentMessage())) shouldContain "HotMC"
+            menus.close()
             tasks.close()
         }
     }
 })
+
+private fun siteSlots(configuration: VoteMenuConfiguration): Map<MonitoringSource, Int> =
+    VoteMenuSchema.elements.mapValues { (_, element) ->
+        configuration.catalog.require(VoteMenuSchema.menuId).slot(element).index
+    }
 
 private fun click(
     paper: MockBukkitTestRuntime,
