@@ -91,15 +91,37 @@ gui:
       hide-tooltip: true
     loading:
       material: CLOCK
+      # Available tags: <name>, <loading>
+      name: '<name>'
+      lore:
+        - '<loading>'
     minecraft-rating:
       material: GOLD_INGOT
       custom-model-data: 0
+      # Available tags: <name>, <status>, <total>, <spacer>,
+      # <history-title>, <empty-message>, <history-unavailable>, <action>.
+      # Flags: history-available, history-empty. Repeat history: <row>.
+      name: '<name>'
+      lore: &site-lore
+        - { text: '<status>', when: history-available }
+        - { text: '<total>', when: history-available }
+        - '<spacer>'
+        - { text: '<history-title>', when: history-available }
+        - { repeat: history, text: '<row>', when: history-available }
+        - { text: '<empty-message>', when: [history-available, history-empty] }
+        - { text: '<history-unavailable>', unless: history-available }
+        - '<spacer>'
+        - '<action>'
     hotmc:
       material: REDSTONE
       custom-model-data: 0
+      name: '<name>'
+      lore: *site-lore
     monitoring-minecraft:
       material: EMERALD
       custom-model-data: 0
+      name: '<name>'
+      lore: *site-lore
 
 monitorings:
   minecraft-rating:

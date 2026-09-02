@@ -11,6 +11,7 @@ import ru.arc.network.NetworkPlayerName
 import ru.arc.paper.menu.PaperMenuContent
 import ru.arc.paper.menu.PaperMenuEntry
 import ru.arc.paper.menu.PaperMenuItemFactory
+import ru.arc.paper.menu.PaperMenuItemRenderContext
 import ru.arc.paper.menu.PaperMenuService
 import ru.arc.paper.menu.PaperMenuSession
 import ru.ruscrafting.votes.command.VoteMenuOpener
@@ -88,12 +89,16 @@ class VoteMenu(
                     val site = runtime.settings.presentations.getValue(source)
                     itemFactory.create(
                         configuration.templates.getValue("loading"),
-                        runtime.locale.render(
-                            "gui.loading-name",
-                            player,
-                            mapOf("site" to runtime.locale.site(source, player, site.displayName)),
+                        PaperMenuItemRenderContext(
+                            values = mapOf(
+                                "name" to runtime.locale.render(
+                                    "gui.loading-name",
+                                    player,
+                                    mapOf("site" to runtime.locale.site(source, player, site.displayName)),
+                                ),
+                                "loading" to runtime.locale.renderLines("gui.loading-lore", player).single(),
+                            ),
                         ),
-                        runtime.locale.renderLines("gui.loading-lore", player),
                     )
                 }
                 element to PaperMenuEntry(
@@ -112,18 +117,18 @@ class VoteMenu(
         source: MonitoringSource,
         history: VoteSiteHistory?,
         historyAvailable: Boolean,
-    ) = itemFactory.create(
-        template = configuration.templates.getValue(
-            requireNotNull(
-                configuration.catalog.require(VoteMenuSchema.menuId)
-                    .elements.getValue(VoteMenuSchema.elements.getValue(source)).template,
-            ) { "Vote menu element '${source.configKey}' must reference an item template" }.value,
-        ),
-        name = runtime.locale.site(source, player, runtime.settings.presentations.getValue(source).displayName),
-        lore = buildList {
+    ): org.bukkit.inventory.ItemStack {
+        val recentVotes = history?.recentVotes.orEmpty()
+        val values = buildMap {
+            put("name", runtime.locale.site(source, player, runtime.settings.presentations.getValue(source).displayName))
+            put("spacer", runtime.locale.render("gui.spacer", player))
+            put("action", runtime.locale.render("gui.site-action", player))
+            put("empty-message", runtime.locale.render("gui.site-history-empty", player))
+            put("history-unavailable", runtime.locale.render("gui.site-history-unavailable", player))
             if (historyAvailable) {
-                val latest = history?.recentVotes?.firstOrNull()
-                add(
+                val latest = recentVotes.firstOrNull()
+                put(
+                    "status",
                     runtime.locale.render(
                         if (latest != null && windows.isActive(source, latest, clock.instant())) {
                             "gui.site-status-voted"
@@ -133,22 +138,35 @@ class VoteMenu(
                         player,
                     ),
                 )
-                add(
+                put(
+                    "total",
                     runtime.locale.render(
                         "gui.site-total",
                         player,
                         mapOf("total" to runtime.locale.text(history?.totalVotes ?: 0)),
                     ),
                 )
-                add(runtime.locale.render("gui.spacer", player))
-                add(runtime.locale.render("gui.site-history-title", player))
-                val recentVotes = history?.recentVotes.orEmpty()
-                if (recentVotes.isEmpty()) {
-                    add(runtime.locale.render("gui.site-history-empty", player))
-                } else {
-                    recentVotes.forEach { votedAt ->
-                        add(
-                            runtime.locale.render(
+                put("history-title", runtime.locale.render("gui.site-history-title", player))
+            }
+        }
+        val flags = buildSet {
+            if (historyAvailable) add("history-available")
+            if (historyAvailable && recentVotes.isEmpty()) add("history-empty")
+        }
+        return itemFactory.create(
+            template = configuration.templates.getValue(
+            requireNotNull(
+                configuration.catalog.require(VoteMenuSchema.menuId)
+                    .elements.getValue(VoteMenuSchema.elements.getValue(source)).template,
+            ) { "Vote menu element '${source.configKey}' must reference an item template" }.value,
+        ),
+            context = PaperMenuItemRenderContext(
+                values = values,
+                flags = flags,
+                repeats = mapOf(
+                    "history" to recentVotes.map { votedAt ->
+                        mapOf(
+                            "row" to runtime.locale.render(
                                 "gui.site-history-row",
                                 player,
                                 mapOf(
@@ -158,15 +176,11 @@ class VoteMenu(
                                 ),
                             ),
                         )
-                    }
-                }
-            } else {
-                add(runtime.locale.render("gui.site-history-unavailable", player))
-            }
-            add(runtime.locale.render("gui.spacer", player))
-            add(runtime.locale.render("gui.site-action", player))
-        },
-    )
+                    },
+                ),
+            ),
+        )
+    }
 
     private fun sendLink(player: Player, runtime: VoteLiveConfiguration, source: MonitoringSource) {
         val presentation = runtime.settings.presentations.getValue(source)

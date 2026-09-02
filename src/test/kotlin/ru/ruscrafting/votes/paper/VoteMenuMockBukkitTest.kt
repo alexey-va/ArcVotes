@@ -187,7 +187,7 @@ class VoteMenuMockBukkitTest : StringSpec({
         }
     }
 
-    "layout and background changes move the semantic action without code changes" {
+    "layout background and lore changes apply without code changes" {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("ArcVotesConfiguredMenuTest")
             val player = paper.addPlayer("VoteLayout")
@@ -196,7 +196,8 @@ class VoteMenuMockBukkitTest : StringSpec({
             root.resolve("config.yml").writeText(
                 root.resolve("config.yml").readText()
                     .replace("hotmc: { slot: 13, template: hotmc }", "hotmc: { slot: 10, template: hotmc }")
-                    .replace("material: GRAY_STAINED_GLASS_PANE", "material: BLUE_STAINED_GLASS_PANE"),
+                    .replace("material: GRAY_STAINED_GLASS_PANE", "material: BLUE_STAINED_GLASS_PANE")
+                    .replace("        - '<action>'", "        - '<action>'\n        - '<action>'"),
             )
             val settings = ArcVotesSettings.loadFresh(root) { null }
             val menuConfiguration = VoteMenuConfiguration.loadFresh(root)
@@ -210,6 +211,7 @@ class VoteMenuMockBukkitTest : StringSpec({
 
             player.openInventory.topInventory.getItem(13)?.type shouldBe Material.BLUE_STAINED_GLASS_PANE
             player.openInventory.topInventory.getItem(10)?.type shouldBe Material.REDSTONE
+            player.openInventory.topInventory.getItem(10).plainLore().count { "Нажмите" in it } shouldBe 2
             click(paper, player, 13).isCancelled shouldBe true
             player.nextComponentMessage() shouldBe null
             click(paper, player, 10).isCancelled shouldBe true
