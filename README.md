@@ -36,7 +36,11 @@ Tracked YAML contains environment-variable names only. Set the variables named i
 ## Build
 
 ```bash
-./gradlew --no-daemon clean test shadowJar -ParcCoreDir=../arc-core
+./gradlew --no-daemon clean test shadowJar
 ```
+
+The standalone build resolves the pinned public arc-core release. Add
+`-ParcCoreDir=../arc-core` only when intentionally testing coordinated local
+core changes.
 
 The packaged plugin is `build/libs/ArcVotes-0.4.0.jar`. MySQL integration tests run in CI, not in the local lane.

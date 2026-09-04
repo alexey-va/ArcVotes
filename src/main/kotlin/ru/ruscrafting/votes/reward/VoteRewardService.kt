@@ -54,6 +54,7 @@ class VoteRewardService(
     private val pollInFlight = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
     private val nextPollAtNanos = AtomicLong(0L)
+    private var nextPlayerOffset = 0
     private val scope = OneTimeUseScope.parse(live().settings.serverId)
     private val debug = StructuredDebugLine("ARCVOTES_REWARD")
 
@@ -91,14 +92,19 @@ class VoteRewardService(
         val runtime = live()
         val reward = runtime.settings.reward
         if (!reward.enabled || !pollInFlight.compareAndSet(false, true)) return
-        val online = server.onlinePlayers
-            .asSequence()
-            .take(reward.maximumOnlinePlayerBatch)
-            .associateBy { it.name.lowercase(Locale.ROOT) }
-        if (online.isEmpty()) {
+        val players = server.onlinePlayers.toList()
+        if (players.isEmpty()) {
+            nextPlayerOffset = 0
             pollInFlight.set(false)
             return
         }
+        val start = nextPlayerOffset % players.size
+        val batchSize = minOf(reward.maximumOnlinePlayerBatch, players.size)
+        val online = (0 until batchSize).associate { offset ->
+            val player = players[(start + offset) % players.size]
+            player.name.lowercase(Locale.ROOT) to player
+        }
+        nextPlayerOffset = (start + batchSize) % players.size
         val names = online.values.mapTo(linkedSetOf()) { NetworkPlayerName.of(it.name) }
         repository.findPendingForPlayers(names, reward.maximumPendingPerPlayer)
             .whenCompleteSync(tasks) { pending, failure ->

@@ -70,6 +70,42 @@ class VoteRewardServiceTest : FreeSpec({
         repository.singlePlayerLookups shouldBe 0
     }
 
+    "periodic reconciliation rotates bounded batches and tolerates a shrinking online list" {
+        val scheduler = TestTaskScheduler()
+        val players = mutableListOf(player("First"), player("Second"), player("Third"))
+        val server = mockk<Server>()
+        every { server.onlinePlayers } answers { players }
+        val event = voteEvent("Third")
+        val repository = RecordingRepository(pending = listOf(event))
+        val deposited = mutableListOf<String>()
+        val service = service(server, scheduler, repository, RecordingLedger(), VoteRewardDepositor { recipient, _ ->
+            deposited += recipient.name
+            RewardDepositResult.APPLIED
+        }, maximumOnlinePlayerBatch = 2)
+
+        repeat(2) {
+            service.pollOnlinePlayers()
+            repeat(16) { scheduler.executeImmediate() }
+        }
+        repository.polledNames.map { batch -> batch.map { it.value } } shouldBe
+            listOf(listOf("First", "Second"), listOf("Third", "First"))
+        deposited shouldContainExactly listOf("Third", "Third")
+        repository.granted shouldContainExactly listOf(event.id)
+
+        players.removeAt(2)
+        players.removeAt(1)
+        service.pollOnlinePlayers()
+        scheduler.executeImmediate()
+        repository.polledNames.last().map { it.value } shouldBe listOf("First")
+        players.clear()
+        service.pollOnlinePlayers()
+        repository.polledNames.size shouldBe 3
+        players += player("Returned")
+        service.pollOnlinePlayers()
+        scheduler.executeImmediate()
+        repository.polledNames.last().map { it.value } shouldBe listOf("Returned")
+    }
+
     "standard and premium rewards use independent one-time claims" {
         val scheduler = TestTaskScheduler()
         val player = player("Steve")
@@ -249,8 +285,10 @@ private fun service(
     depositor: VoteRewardDepositor,
     locale: VoteLocale = mockk(relaxed = true),
     nanoTime: () -> Long = System::nanoTime,
+    maximumOnlinePlayerBatch: Int = 500,
 ): VoteRewardService {
     val settings = testSettings()
+    every { settings.reward } returns rewardSettings().copy(maximumOnlinePlayerBatch = maximumOnlinePlayerBatch)
     val live = VoteLiveState(
         VoteLiveConfiguration(
             settings = settings,
