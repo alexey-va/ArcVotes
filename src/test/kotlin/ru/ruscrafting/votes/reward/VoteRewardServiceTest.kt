@@ -34,6 +34,8 @@ import ru.ruscrafting.votes.domain.VoteRecordResult
 import ru.ruscrafting.votes.domain.VoteRewardBundle
 import ru.ruscrafting.votes.domain.VoteRewardComponent
 import ru.ruscrafting.votes.storage.VoteRepository
+import ru.ruscrafting.votes.storage.VoteHistoryLookup
+import ru.ruscrafting.votes.status.VoteDailyStatusService
 import ru.ruscrafting.votes.text.VoteLocale
 import java.math.BigDecimal
 import java.time.Instant
@@ -68,6 +70,80 @@ class VoteRewardServiceTest : FreeSpec({
         scheduler.advanceMs(5_000)
         repository.polledNames.size shouldBe 2
         repository.singlePlayerLookups shouldBe 0
+    }
+
+    "a synchronous poll lookup failure does not wedge future polling" {
+        val scheduler = TestTaskScheduler()
+        val player = player("OnlineSteve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val repository = RecordingRepository(pollFailure = true)
+        val service = service(server, scheduler, repository, RecordingLedger(), VoteRewardDepositor { _, _ ->
+            RewardDepositResult.APPLIED
+        })
+
+        service.pollOnlinePlayers()
+        repository.pollFailure = false
+        service.pollOnlinePlayers()
+
+        repository.polledNames.size shouldBe 1
+    }
+
+    "a synchronous join lookup failure does not wedge future delivery" {
+        val scheduler = TestTaskScheduler()
+        val player = player("Steve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val repository = RecordingRepository(singleLookupFailure = true)
+        val service = service(server, scheduler, repository, RecordingLedger(), VoteRewardDepositor { _, _ ->
+            RewardDepositResult.APPLIED
+        })
+
+        service.deliverPending(player)
+        repository.singleLookupFailure = false
+        service.deliverPending(player)
+
+        repository.singlePlayerLookups shouldBe 1
+    }
+
+    "a durable non-reward event updates status while its player is offline" {
+        val scheduler = TestTaskScheduler()
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns emptyList()
+        val playerName = NetworkPlayerName.of("OfflineSteve")
+        val now = Instant.parse("2026-08-31T12:00:00Z")
+        val historyResult = CompletableFuture<Map<MonitoringSource, Instant>>()
+        val dailyStatus = VoteDailyStatusService(
+            VoteHistoryLookup { _, _, _ -> historyResult },
+            java.time.Clock.fixed(now, java.time.ZoneOffset.UTC),
+        )
+        val settings = testSettings()
+        every { settings.reward } returns rewardSettings().copy(enabled = false)
+        val live = VoteLiveState(
+            VoteLiveConfiguration(settings, mockk(relaxed = true), dailyStatus, null, null, true, true),
+        )
+        val service = VoteRewardService(
+            server,
+            LifecycleTaskScope(scheduler),
+            RecordingRepository(),
+            RecordingLedger(),
+            live::current,
+            Logger.getAnonymousLogger().apply { level = Level.OFF },
+            LifecycleTaskScope(scheduler),
+        )
+        val lookup = dailyStatus.find(playerName)
+        val event = voteEvent("OfflineSteve", MonitoringSource.HOTMC).copy(
+            vote = voteEvent("OfflineSteve", MonitoringSource.HOTMC).vote.copy(occurredAt = now),
+            receivedAt = now,
+            reward = null,
+            rewardState = RewardState.NONE,
+        )
+
+        service.onDurableEvent(event)
+        scheduler.executeImmediate()
+        historyResult.complete(emptyMap())
+
+        lookup.join() shouldBe setOf(MonitoringSource.HOTMC)
     }
 
     "periodic reconciliation rotates bounded batches and tolerates a shrinking online list" {
@@ -362,6 +438,8 @@ private fun voteEvent(
 private class RecordingRepository(
     private val pending: List<VoteEvent> = emptyList(),
     private val markGrantedResult: Boolean = false,
+    var pollFailure: Boolean = false,
+    var singleLookupFailure: Boolean = false,
 ) : VoteRepository {
     val polledNames = mutableListOf<Set<NetworkPlayerName>>()
     val granted = mutableListOf<UUID>()
@@ -374,6 +452,7 @@ private class RecordingRepository(
         CompletableFuture.failedFuture(UnsupportedOperationException())
 
     override fun findPending(playerName: NetworkPlayerName, limit: Int): CompletableFuture<List<VoteEvent>> {
+        if (singleLookupFailure) throw IllegalStateException("simulated synchronous join failure")
         singlePlayerLookups += 1
         return CompletableFuture.completedFuture(pending)
     }
@@ -382,6 +461,7 @@ private class RecordingRepository(
         playerNames: Set<NetworkPlayerName>,
         perPlayerLimit: Int,
     ): CompletableFuture<Map<String, List<VoteEvent>>> {
+        if (pollFailure) throw IllegalStateException("simulated synchronous poll failure")
         polledNames += playerNames
         val requested = playerNames.mapTo(hashSetOf()) { it.value.lowercase(Locale.ROOT) }
         return CompletableFuture.completedFuture(

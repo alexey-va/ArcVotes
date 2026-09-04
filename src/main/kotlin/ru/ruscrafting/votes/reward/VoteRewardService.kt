@@ -80,8 +80,10 @@ class VoteRewardService(
     }
 
     fun onDurableEvent(event: VoteEvent) {
+        val runtime = live()
+        runtime.dailyStatus?.observe(event)
         if (event.rewardState != RewardState.PENDING) return
-        if (!live().settings.reward.enabled) return
+        if (!runtime.settings.reward.enabled) return
         tasks.runSync {
             server.onlinePlayers.firstOrNull { it.name.equals(event.vote.playerName.value, ignoreCase = true) }
                 ?.let(::deliverPending)
@@ -106,7 +108,14 @@ class VoteRewardService(
         }
         nextPlayerOffset = (start + batchSize) % players.size
         val names = online.values.mapTo(linkedSetOf()) { NetworkPlayerName.of(it.name) }
-        repository.findPendingForPlayers(names, reward.maximumPendingPerPlayer)
+        val lookup = try {
+            repository.findPendingForPlayers(names, reward.maximumPendingPerPlayer)
+        } catch (failure: Throwable) {
+            pollInFlight.set(false)
+            logger.log(Level.WARNING, "Could not start pending vote reward poll", failure)
+            return
+        }
+        lookup
             .whenCompleteSync(tasks) { pending, failure ->
                 pollInFlight.set(false)
                 if (failure != null) {
@@ -122,7 +131,14 @@ class VoteRewardService(
     fun deliverPending(player: Player) {
         val reward = live().settings.reward
         if (!reward.enabled || !activePlayers.add(player.uniqueId)) return
-        repository.findPending(NetworkPlayerName.of(player.name), reward.maximumPendingPerPlayer)
+        val lookup = try {
+            repository.findPending(NetworkPlayerName.of(player.name), reward.maximumPendingPerPlayer)
+        } catch (failure: Throwable) {
+            activePlayers.remove(player.uniqueId)
+            logger.log(Level.WARNING, "Could not start loading pending vote rewards", failure)
+            return
+        }
+        lookup
             .whenCompleteSync(tasks) { events, failure ->
                 if (failure != null) {
                     logger.log(Level.WARNING, "Could not load pending vote rewards", failure)
