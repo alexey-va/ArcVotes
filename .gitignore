@@ -8,3 +8,4 @@ out/
 *.env
 runtime/
 visual-preview/
+node_modules/
