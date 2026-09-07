@@ -43,9 +43,9 @@ test('/vote gui opens the real menu and /vote status reports provider readiness'
     const text = [item.getDisplayName(), ...item.getLore()].join(' ');
     return /MinecraftRating|Minecraft/i.test(text);
   });
-  const minecraftText = [minecraft.getDisplayName(), ...minecraft.getLore()].join(' ');
+  const minecraftText = `${minecraft.displayName()} ${minecraft.loreText()}`;
   assert.match(minecraftText, /MinecraftRating|Minecraft/i);
-  assert.notEqual(minecraft.getLore().join(' ').trim(), '', 'vote item must expose status/action lore');
+  assert.notEqual(minecraft.loreText().trim(), '', 'vote item must expose status/action lore');
   await minecraft.click();
   await expect(player).toHaveReceivedMessage(/Voting link|Ссылка для голосования/i);
   await player.makeOp();
@@ -56,6 +56,7 @@ test('/vote gui opens the real menu and /vote status reports provider readiness'
 
 test('signed callback delivers real vault and token rewards exactly once', async ({ player }) => {
   const timestamp = new Date().toISOString();
+  await player.makeOp();
   assert.equal(await balance(player), 0);
   assert.equal(await balance(player, 'tokens'), 0);
 
