@@ -167,7 +167,10 @@ class VoteRewardService(
         val event = events[eventIndex]
         runtime.dailyStatus?.observe(event)
         val components = requireNotNull(event.reward) { "Pending vote has no reward bundle" }.components
-        deliverComponent(player, event, components, componentIndex = 0, anyApplied = false, events, eventIndex, runtime)
+        deliverComponent(
+            player, event, components, componentIndex = 0, anyApplied = false, events, eventIndex, runtime,
+            onCompleted = { ArcProductTelemetryBridge.rewardClaimed(player.uniqueId, "vote:${event.id}") },
+        )
     }
 
     private fun deliverComponent(
@@ -179,9 +182,10 @@ class VoteRewardService(
         events: List<VoteEvent>,
         eventIndex: Int,
         runtime: VoteLiveConfiguration,
+        onCompleted: (() -> Unit)? = null,
     ) {
         if (componentIndex >= components.size) {
-            markGranted(player, event, notify = anyApplied, events, eventIndex, runtime)
+            markGranted(player, event, notify = anyApplied, events, eventIndex, runtime, onCompleted)
             return
         }
         if (!player.isOnline) {
@@ -219,6 +223,7 @@ class VoteRewardService(
                             events,
                             eventIndex,
                             runtime,
+                            onCompleted,
                         )
                     } else {
                         abandonForRecovery(
@@ -242,6 +247,7 @@ class VoteRewardService(
                         events,
                         eventIndex,
                         runtime,
+                        onCompleted,
                     )
                 OneTimeUseClaimResult.Busy -> deliverNextEvent(player, events, eventIndex + 1)
                 OneTimeUseClaimResult.IdentityConflict,
@@ -262,15 +268,23 @@ class VoteRewardService(
         events: List<VoteEvent>,
         eventIndex: Int,
         runtime: VoteLiveConfiguration,
+        onCompleted: (() -> Unit)? = null,
     ) {
         val component = components[componentIndex]
         if (!player.isOnline) {
             releaseAndContinue(player, event, component, claim, events, eventIndex)
             return
         }
+        val auditToken =
+            ArcAuditRewardBridge.mark(
+                player.uniqueId,
+                component,
+                event.oneTimeUseIdentity(component).useId.toString(),
+            )
         val result = try {
             requireNotNull(runtime.rewardDepositor) { "Vote reward provider is unavailable" }.deposit(player, component)
         } catch (failure: Throwable) {
+            ArcAuditRewardBridge.cancel(player.uniqueId, auditToken)
             logger.log(
                 Level.SEVERE,
                 debug.line("source" to event.vote.source.configKey, "component" to component.key, "outcome" to "effect_unknown"),
@@ -280,6 +294,7 @@ class VoteRewardService(
             return
         }
         if (result != RewardDepositResult.APPLIED) {
+            ArcAuditRewardBridge.cancel(player.uniqueId, auditToken)
             logger.warning(
                 debug.line("source" to event.vote.source.configKey, "component" to component.key, "outcome" to "provider_rejected"),
             )
@@ -304,6 +319,7 @@ class VoteRewardService(
                     events,
                     eventIndex,
                     runtime,
+                    onCompleted,
                 )
             }
         }
@@ -351,13 +367,17 @@ class VoteRewardService(
         events: List<VoteEvent>,
         eventIndex: Int,
         runtime: VoteLiveConfiguration,
+        onCompleted: (() -> Unit)? = null,
     ) {
         repository.markGranted(event.id, player.uniqueId).whenCompleteSync(tasks) { updated, failure ->
             if (failure != null) {
                 logger.log(Level.SEVERE, debug.line("source" to event.vote.source.configKey, "outcome" to "state_unknown"), failure)
-            } else if (updated == true && notify && player.isOnline) {
-                runCatching { sendRewardMessage(player, event, runtime) }
-                    .onFailure { displayFailure -> logger.log(Level.WARNING, "Vote reward was granted but its message could not be shown", displayFailure) }
+            } else if (updated == true) {
+                onCompleted?.invoke()
+                if (notify && player.isOnline) {
+                    runCatching { sendRewardMessage(player, event, runtime) }
+                        .onFailure { displayFailure -> logger.log(Level.WARNING, "Vote reward was granted but its message could not be shown", displayFailure) }
+                }
             }
             deliverNextEvent(player, events, eventIndex + 1)
         }
@@ -435,4 +455,50 @@ class VoteRewardService(
         const val TICKS_PER_SECOND = 20L
         const val POLL_TICK_TICKS = TICKS_PER_SECOND
     }
+}
+
+private object ArcAuditRewardBridge {
+    private val markMethod = lazy {
+        Class.forName("ru.arc.audit.ExternalEconomyAuditBridge").getMethod(
+            "markExternalReward",
+            UUID::class.java,
+            String::class.java,
+            String::class.java,
+            Double::class.javaPrimitiveType,
+            String::class.java,
+            String::class.java,
+        )
+    }
+    private val cancelMethod = lazy {
+        Class.forName("ru.arc.audit.ExternalEconomyAuditBridge").getMethod("cancel", UUID::class.java, String::class.java)
+    }
+
+    fun mark(playerId: UUID, component: VoteRewardComponent, rewardId: String): String? = runCatching {
+        markMethod.value.invoke(
+            null,
+            playerId,
+            "voting",
+            "vote_reward",
+            component.amount.toDouble(),
+            if (component.provider == ru.ruscrafting.votes.domain.RewardProvider.VAULT) "vault" else component.currencyId,
+            rewardId,
+        ) as String?
+    }.getOrNull()
+
+    fun cancel(playerId: UUID, token: String?) {
+        if (token == null) return
+        runCatching { cancelMethod.value.invoke(null, playerId, token) }
+    }
+}
+
+private object ArcProductTelemetryBridge {
+    private val recordMethod = lazy {
+        Class.forName("ru.arc.metrics.ExternalProductTelemetryBridge").getMethod(
+            "recordEvent", UUID::class.java, String::class.java, String::class.java, String::class.java,
+        )
+    }
+
+    fun rewardClaimed(playerId: UUID, operationId: String): Boolean = runCatching {
+        recordMethod.value.invoke(null, playerId, "arcvotes", "vote_reward_claimed", operationId) as Boolean
+    }.getOrDefault(false)
 }
