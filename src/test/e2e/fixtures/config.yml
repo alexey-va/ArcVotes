@@ -1,0 +1,54 @@
+server-id: e2e
+locale:
+  default: en
+  use-client-locale: false
+http:
+  enabled: true
+  bind-address: 127.0.0.1
+  port: 9187
+  worker-threads: 2
+  queue-capacity: 64
+  maximum-body-bytes: 16384
+  maximum-header-count: 32
+  maximum-header-bytes: 8192
+  maximum-header-value-bytes: 4096
+  persistence-timeout-ms: 10000
+  trust-single-forwarded-client-ip: true
+mysql:
+  enabled: true
+  host: 127.0.0.1
+  port: 3306
+  database: minecraft
+  username: minecraft
+  password-env: ARC_VOTES_MYSQL_PASSWORD
+  ssl-mode: DISABLED
+  minimum-idle: 1
+  maximum-pool-size: 4
+  connection-timeout-ms: 10000
+  socket-timeout-ms: 30000
+  validation-timeout-ms: 5000
+  max-lifetime-ms: 1700000
+  fail-fast: true
+reward:
+  enabled: true
+  poll-interval-seconds: 1
+  maximum-pending-per-player: 16
+  maximum-online-player-batch: 500
+  standard:
+    enabled: true
+    amount: 1000.00
+  premium:
+    enabled: true
+    currency-id: tokens
+    amount: 3.00
+monitorings:
+  monitoring-minecraft:
+    enabled: true
+    display-name: MonitoringMinecraft
+    vote-url: https://example.test/vote
+    secret-env: ARC_VOTES_MONITORING_MINECRAFT_SECRET
+    expected-server-id: '43'
+    maximum-age-seconds: 691200
+    maximum-future-skew-seconds: 300
+    enforce-ip-allowlist: false
+    allowed-ips: []

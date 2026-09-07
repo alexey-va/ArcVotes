@@ -9,6 +9,9 @@ group = "ru.ruscrafting"
 version = "0.4.0"
 description = "Authenticated vote callbacks and idempotent rewards for RusCrafting"
 
+val e2eArcJar = providers.gradleProperty("e2eArcJar")
+    .orElse(layout.projectDirectory.file("e2e-arc/build/libs/ARC-1.4.3.jar").asFile.absolutePath)
+
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
     kotlin.srcDir("src/integrationTest/kotlin")
     compileClasspath += sourceSets.main.get().output + sourceSets.test.get().output
@@ -23,8 +26,17 @@ plugwright {
     nodeVersion.set("22.14.0")
     acceptEula.set(true)
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
+    downloadPlugins {
+        url("https://cdn.modrinth.com/data/Vebnzrzj/versions/OrIs0S6b/LuckPerms-Bukkit-5.5.17.jar")
+        url("https://github.com/MilkBowl/Vault/releases/download/1.7.3/Vault.jar")
+        url("https://repo.rus-crafting.ru/grocermc/ru/ruscrafting/thirdparty/rediseconomy/4.5.12/rediseconomy-4.5.12.jar")
+    }
     writeFiles {
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/ARC-1.4.3.jar", file(e2eArcJar.get()))
+        file("plugins/ARC/modules/redis.yml", projectDir.resolve("src/test/e2e/fixtures/arc-redis.yml"))
+        file("plugins/RedisEconomy/config.yml", projectDir.resolve("src/test/e2e/fixtures/rediseconomy.yml"))
+        file("plugins/ArcVotes/config.yml", projectDir.resolve("src/test/e2e/fixtures/config.yml").readText())
     }
 }
 

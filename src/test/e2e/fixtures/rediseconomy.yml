@@ -1,0 +1,43 @@
+# Disposable zero-balance provider fixture; CI supplies the Redis service.
+lang: en-US
+migrationEnabled: false
+redis:
+  host: 127.0.0.1
+  port: 6379
+  user: ""
+  password: ""
+  database: 0
+  clientName: arcvotes-e2e
+  timeout: 3000
+  poolSize: 4
+  tryAgainCount: 5
+  ssl: false
+clusterId: arcvotes-e2e
+defaultCurrencyName: vault
+currencies:
+  - currencyName: vault
+    currencySingle: ' 💰'
+    currencyPlural: ' 💰'
+    decimalFormat: '#0.00'
+    languageTag: en-US
+    startingBalance: 0.0
+    maxBalance: .inf
+    payTax: 0.0
+    saveTransactions: true
+    transactionsTTL: 0
+    bankEnabled: false
+    taxOnlyPay: false
+    executorThreads: 1
+  - currencyName: tokens
+    currencySingle: ' жет. '
+    currencyPlural: ' жет. '
+    decimalFormat: '#0.##'
+    languageTag: en-US
+    startingBalance: 0.0
+    maxBalance: 1000000.0
+    payTax: 0.0
+    saveTransactions: true
+    transactionsTTL: -1
+    bankEnabled: false
+    taxOnlyPay: false
+    executorThreads: 1

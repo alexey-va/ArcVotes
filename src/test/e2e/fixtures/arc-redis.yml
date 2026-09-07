@@ -1,0 +1,3 @@
+enabled: false
+server-name: e2e
+main-server: false
