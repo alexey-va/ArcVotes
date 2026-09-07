@@ -3,15 +3,16 @@ import { test, expect } from '@drownek/plugwright';
 
 const CALLBACK_SECRET = process.env.ARC_VOTES_MONITORING_MINECRAFT_SECRET;
 
-async function postVote(player, timestamp) {
+async function postVote(playerOrName, timestamp) {
   assert.ok(CALLBACK_SECRET, 'callback secret must be supplied by the E2E environment');
+  const nickname = typeof playerOrName === 'string' ? playerOrName : playerOrName.username;
   const response = await fetch('http://127.0.0.1:9187/callbacks/monitoring-minecraft', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${CALLBACK_SECRET}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ nickname: player.username, server_id: 43, timestamp }),
+    body: JSON.stringify({ nickname, server_id: 43, timestamp }),
   });
   assert.equal(response.status, 200, await response.text());
 }
@@ -73,4 +74,27 @@ test('signed callback delivers real vault and token rewards exactly once', async
   await new Promise((resolve) => setTimeout(resolve, 3000));
   assert.equal(await balance(player), 1000, 'duplicate callback minted additional vault');
   assert.equal(await balance(player, 'tokens'), 3, 'duplicate callback minted additional tokens');
+});
+
+test('offline signed callback is delivered on first login and survives reconnect', async ({ createPlayer }) => {
+  const username = 'OfflineVoteE2E';
+  const timestamp = new Date().toISOString();
+  await postVote(username, timestamp);
+
+  const player = await createPlayer({ username });
+  await player.makeOp();
+  await expect(player).toHaveReceivedMessage(/MonitoringMinecraft vote was recorded/i, { timeout: 15000 });
+  await expect(player).toHaveReceivedMessage(/\+1000/);
+  await expect(player).toHaveReceivedMessage(/\+3/);
+  assert.equal(await balance(player), 1000);
+  assert.equal(await balance(player, 'tokens'), 3);
+
+  await player.rejoin();
+  assert.equal(await balance(player), 1000, 'reconnect replayed offline vault reward');
+  assert.equal(await balance(player, 'tokens'), 3, 'reconnect replayed offline token reward');
+
+  await postVote(player, timestamp);
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  assert.equal(await balance(player), 1000, 'duplicate offline callback minted additional vault');
+  assert.equal(await balance(player, 'tokens'), 3, 'duplicate offline callback minted additional tokens');
 });
