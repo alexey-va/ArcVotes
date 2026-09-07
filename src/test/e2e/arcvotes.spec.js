@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test, expect, waitUntil } from '@drownek/plugwright';
+import { test, expect } from '@drownek/plugwright';
 
 const CALLBACK_SECRET = process.env.ARC_VOTES_MONITORING_MINECRAFT_SECRET;
 
@@ -18,12 +18,13 @@ async function postVote(player, timestamp) {
 
 async function balance(player, currency) {
   player.clearMessages();
+  const since = player.getMessageBufferIndex();
   player.chat(`/balance ${player.username}${currency ? ` ${currency}` : ''}`);
-  await waitUntil(() => player.messageBuffer.some((message) => /balance|money|vault|tokens/i.test(String(message))), {
+  await expect(player).toHaveReceivedMessage(/\d+(?:[.,]\d+)?/, {
+    since,
     timeout: 10000,
-    message: `No ${currency || 'vault'} balance response received`,
   });
-  const text = player.messageBuffer.map(String).join('\n');
+  const text = player.messageBuffer.slice(since).join('\n');
   const values = [...text.matchAll(/(?<![A-Za-z])\d+(?:[.,]\d+)?/g)].map((match) => Number(match[0].replace(',', '.')));
   assert.ok(values.length > 0, `Balance response did not contain a number: ${text}`);
   return values.at(-1);
@@ -38,9 +39,13 @@ test('/vote chat renders the configured voting sites', async ({ player }) => {
 test('/vote gui opens the real menu and /vote status reports provider readiness', async ({ player }) => {
   player.chat('/vote gui');
   const gui = await player.gui({ title: /Voting sites|Голосования/ });
-  const minecraft = gui.locator((item) => item.name === 'gold_ingot');
-  assert.match(minecraft.displayName(), /MinecraftRating|Minecraft/i);
-  assert.notEqual(minecraft.loreText().trim(), '', 'vote item must expose status/action lore');
+  const minecraft = gui.locator((item) => {
+    const text = [item.getDisplayName(), ...item.getLore()].join(' ');
+    return /MinecraftRating|Minecraft/i.test(text);
+  });
+  const minecraftText = [minecraft.getDisplayName(), ...minecraft.getLore()].join(' ');
+  assert.match(minecraftText, /MinecraftRating|Minecraft/i);
+  assert.notEqual(minecraft.getLore().join(' ').trim(), '', 'vote item must expose status/action lore');
   await minecraft.click();
   await expect(player).toHaveReceivedMessage(/Voting link|Ссылка для голосования/i);
   await player.makeOp();
@@ -54,7 +59,10 @@ test('signed callback delivers real vault and token rewards exactly once', async
   assert.equal(await balance(player), 0);
   assert.equal(await balance(player, 'tokens'), 0);
 
+  player.bot.quit();
+  await new Promise((resolve) => setTimeout(resolve, 500));
   await postVote(player, timestamp);
+  await player.rejoin({ clearMessages: true });
   await expect(player).toHaveReceivedMessage(/MonitoringMinecraft vote was recorded/i, { timeout: 15000 });
   await expect(player).toHaveReceivedMessage(/\+1000/);
   await expect(player).toHaveReceivedMessage(/\+3/);
