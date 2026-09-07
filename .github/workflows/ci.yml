@@ -17,12 +17,6 @@ on:
       - .codex/**
       - src/test/e2e/**
   workflow_dispatch:
-    inputs:
-      heavy_tests:
-        description: Run integration and real Paper E2E jobs
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -47,7 +41,6 @@ jobs:
       - run: ./gradlew --no-daemon test shadowJar --build-cache
 
   integration:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     name: MySQL integration
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -63,7 +56,6 @@ jobs:
       - run: ./gradlew --no-daemon integrationTest
 
   e2e:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     name: Real Paper E2E (Plugwright)
     runs-on: ubuntu-latest
     timeout-minutes: 20
