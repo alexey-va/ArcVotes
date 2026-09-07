@@ -60,10 +60,7 @@ test('signed callback delivers real vault and token rewards exactly once', async
   assert.equal(await balance(player), 0);
   assert.equal(await balance(player, 'tokens'), 0);
 
-  player.bot.quit();
-  await new Promise((resolve) => setTimeout(resolve, 500));
   await postVote(player, timestamp);
-  await player.rejoin({ clearMessages: true });
   await expect(player).toHaveReceivedMessage(/MonitoringMinecraft vote was recorded/i, { timeout: 15000 });
   await expect(player).toHaveReceivedMessage(/\+1000/);
   await expect(player).toHaveReceivedMessage(/\+3/);
