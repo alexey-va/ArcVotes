@@ -25,9 +25,10 @@ async function balance(player, currency) {
     timeout: 10000,
   });
   const text = player.messageBuffer.slice(since).join('\n');
-  const values = [...text.matchAll(/(?<![A-Za-z])\d+(?:[.,]\d+)?/g)].map((match) => Number(match[0].replace(',', '.')));
-  assert.ok(values.length > 0, `Balance response did not contain a number: ${text}`);
-  return values.at(-1);
+  const match = text.match(/\bhas\s+(-?\d+(?:[.,]\d+)?)([kKmMbB])?/i);
+  assert.ok(match, `Balance response did not contain a number: ${text}`);
+  const multiplier = { k: 1e3, m: 1e6, b: 1e9 }[match[2]?.toLowerCase()] ?? 1;
+  return Number(match[1].replace(',', '.')) * multiplier;
 }
 
 test('/vote chat renders the configured voting sites', async ({ player }) => {
@@ -43,6 +44,7 @@ test('/vote gui opens the real menu and /vote status reports provider readiness'
     const text = [item.getDisplayName(), ...item.getLore()].join(' ');
     return /MinecraftRating|Minecraft/i.test(text);
   });
+  await expect(minecraft).toHaveLore('Click');
   const minecraftText = `${minecraft.displayName()} ${minecraft.loreText()}`;
   assert.match(minecraftText, /MinecraftRating|Minecraft/i);
   assert.notEqual(minecraft.loreText().trim(), '', 'vote item must expose status/action lore');
