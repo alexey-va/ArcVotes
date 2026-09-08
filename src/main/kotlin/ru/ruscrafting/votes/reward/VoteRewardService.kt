@@ -49,6 +49,7 @@ class VoteRewardService(
     private val logger: Logger,
     private val pollTasks: LifecycleTaskScope = LifecycleTaskScope(),
     private val nanoTime: () -> Long = System::nanoTime,
+    private val onConfirmedEvent: (VoteEvent, UUID) -> Unit = { _, _ -> },
 ) : Listener, AutoCloseable {
     private val activePlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val pollInFlight = AtomicBoolean(false)
@@ -165,6 +166,8 @@ class VoteRewardService(
             return
         }
         val event = events[eventIndex]
+        runCatching { onConfirmedEvent(event, player.uniqueId) }
+            .onFailure { failure -> logger.log(Level.WARNING, "Could not publish confirmed vote", failure) }
         runtime.dailyStatus?.observe(event)
         val components = requireNotNull(event.reward) { "Pending vote has no reward bundle" }.components
         deliverComponent(

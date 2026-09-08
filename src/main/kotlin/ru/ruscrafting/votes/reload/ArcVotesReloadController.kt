@@ -6,6 +6,7 @@ import ru.ruscrafting.votes.callback.VoteIngressCounters
 import ru.ruscrafting.votes.callback.VoteIngressService
 import ru.ruscrafting.votes.config.ArcVotesSettings
 import ru.ruscrafting.votes.config.restartRequiredFields
+import ru.ruscrafting.votes.domain.VoteEvent
 import ru.ruscrafting.votes.live.VoteLiveConfiguration
 import ru.ruscrafting.votes.live.VoteLiveState
 import ru.ruscrafting.votes.reward.VoteRewardDepositor
@@ -45,6 +46,7 @@ class ArcVotesReloadController(
     private val rewardRuntimeFactory: VoteRewardRuntimeFactory,
     private val logger: Logger,
     private val ingressCounters: VoteIngressCounters = VoteIngressCounters(),
+    private val onDurableEvent: (VoteEvent) -> Unit = {},
     private val loadMenuCandidate: (() -> VoteMenuConfiguration)? = null,
     private val applyMenuCandidate: (VoteMenuConfiguration) -> Unit = {},
 ) : ArcVotesReloader, AutoCloseable {
@@ -114,7 +116,10 @@ class ArcVotesReloadController(
                 settings = settings,
                 repository = it,
                 logger = logger,
-                onDurableEvent = { event -> rewardService?.onDurableEvent(event) },
+                onDurableEvent = { event ->
+                    rewardService?.onDurableEvent(event)
+                    onDurableEvent(event)
+                },
                 counters = ingressCounters,
             )
         }

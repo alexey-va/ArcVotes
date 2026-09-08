@@ -23,6 +23,7 @@ import ru.arc.sql.onetime.MySqlOneTimeUseLedger
 import ru.arc.sql.onetime.MySqlOneTimeUsePartition
 import ru.ruscrafting.votes.callback.VoteIngressCounters
 import ru.ruscrafting.votes.callback.VoteIngressService
+import ru.ruscrafting.votes.api.VoteConfirmedEvent
 import ru.ruscrafting.votes.command.ArcVotesAdminCommand
 import ru.ruscrafting.votes.command.VoteCommand
 import ru.ruscrafting.votes.config.ArcVotesSettings
@@ -109,6 +110,7 @@ class ArcVotesPlugin : JavaPlugin() {
                         ledger = ledger,
                         live = live::current,
                         logger = logger,
+                        onConfirmedEvent = ::publishConfirmedVote,
                     ),
                 ).also {
                     server.pluginManager.registerEvents(it, this)
@@ -122,7 +124,10 @@ class ArcVotesPlugin : JavaPlugin() {
                     settings = settings,
                     repository = storage,
                     logger = logger,
-                    onDurableEvent = { event -> rewardService?.onDurableEvent(event) },
+                    onDurableEvent = { event ->
+                        rewardService?.onDurableEvent(event)
+                        publishConfirmedVote(event)
+                    },
                     counters = ingressCounters,
                 )
             }
@@ -144,6 +149,7 @@ class ArcVotesPlugin : JavaPlugin() {
                     rewardRuntimeFactory = rewardRuntimeFactory,
                     logger = logger,
                     ingressCounters = ingressCounters,
+                    onDurableEvent = ::publishConfirmedVote,
                     loadMenuCandidate = { VoteMenuConfiguration.loadFresh(dataPath) },
                     applyMenuCandidate = { candidate ->
                         menuCatalogs.replace(candidate.catalog)
@@ -284,6 +290,21 @@ class ArcVotesPlugin : JavaPlugin() {
     private fun mergeBundledDefaults() {
         ArcVotesSettings.mergeDefaults(dataPath)
         VoteLocale.mergeDefaults(dataPath)
+    }
+
+    private fun publishConfirmedVote(event: ru.ruscrafting.votes.domain.VoteEvent) {
+        lifecycle?.tasks?.runSync {
+            val playerId = event.playerId
+                ?: server.getPlayerExact(event.vote.playerName.value)?.uniqueId
+                ?: return@runSync
+            val onlinePlayer = server.getPlayer(playerId)
+            if (event.playerId == null && onlinePlayer == null) return@runSync
+            server.pluginManager.callEvent(VoteConfirmedEvent(event.id.toString(), playerId))
+        }
+    }
+
+    private fun publishConfirmedVote(event: ru.ruscrafting.votes.domain.VoteEvent, playerId: java.util.UUID) {
+        server.pluginManager.callEvent(VoteConfirmedEvent(event.id.toString(), playerId))
     }
 
     private companion object {

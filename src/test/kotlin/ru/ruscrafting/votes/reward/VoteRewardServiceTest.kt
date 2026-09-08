@@ -106,6 +106,29 @@ class VoteRewardServiceTest : FreeSpec({
         repository.singlePlayerLookups shouldBe 1
     }
 
+    "pending join replay publishes the persisted vote id for the exact player" {
+        val scheduler = TestTaskScheduler()
+        val player = player("OfflineSteve")
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns mutableListOf(player)
+        val event = voteEvent("OfflineSteve")
+        val repository = RecordingRepository(pending = listOf(event))
+        val confirmed = mutableListOf<Pair<UUID, UUID>>()
+        val service = service(
+            server,
+            scheduler,
+            repository,
+            RecordingLedger(),
+            VoteRewardDepositor { _, _ -> RewardDepositResult.APPLIED },
+            onConfirmed = { vote, playerId -> confirmed += vote.id to playerId },
+        )
+
+        service.deliverPending(player)
+        repeat(16) { scheduler.executeImmediate() }
+
+        confirmed shouldContainExactly listOf(event.id to player.uniqueId)
+    }
+
     "a durable non-reward event updates status while its player is offline" {
         val scheduler = TestTaskScheduler()
         val server = mockk<Server>()
@@ -362,6 +385,7 @@ private fun service(
     locale: VoteLocale = mockk(relaxed = true),
     nanoTime: () -> Long = System::nanoTime,
     maximumOnlinePlayerBatch: Int = 500,
+    onConfirmed: (VoteEvent, UUID) -> Unit = { _, _ -> },
 ): VoteRewardService {
     val settings = testSettings()
     every { settings.reward } returns rewardSettings().copy(maximumOnlinePlayerBatch = maximumOnlinePlayerBatch)
@@ -385,6 +409,7 @@ private fun service(
         logger = Logger.getAnonymousLogger().apply { level = Level.OFF },
         pollTasks = LifecycleTaskScope(scheduler),
         nanoTime = nanoTime,
+        onConfirmedEvent = onConfirmed,
     )
 }
 
