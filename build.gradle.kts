@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "0.4.1"
+version = "0.4.2"
 description = "Authenticated vote callbacks and idempotent rewards for RusCrafting"
 
 val e2eArcJar = providers.gradleProperty("e2eArcJar")
@@ -58,6 +58,7 @@ dependencies {
     implementation("ru.ruscrafting.arc:arc-core-paper:2.5.0")
     implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.5.0")
     implementation("ru.ruscrafting.arc:arc-core-sql:2.5.0")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.10")
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
     compileOnly("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
@@ -67,6 +68,7 @@ dependencies {
     testImplementation("io.mockk:mockk:1.14.7")
     testImplementation("org.yaml:snakeyaml:2.5")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.5.0")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") { isTransitive = false }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 

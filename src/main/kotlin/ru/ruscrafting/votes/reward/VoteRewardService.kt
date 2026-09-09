@@ -3,6 +3,7 @@ package ru.ruscrafting.votes.reward
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.JoinConfiguration
 import org.bukkit.Server
+import org.bukkit.Bukkit
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
@@ -19,6 +20,7 @@ import ru.arc.onetime.OneTimeUseCommitResult
 import ru.arc.onetime.OneTimeUseLedger
 import ru.arc.onetime.OneTimeUseReleaseResult
 import ru.arc.onetime.OneTimeUseScope
+import ru.arc.paper.api.ArcTelemetryProvider
 import ru.ruscrafting.votes.domain.RewardState
 import ru.ruscrafting.votes.domain.VoteEvent
 import ru.ruscrafting.votes.domain.VoteRewardComponent
@@ -461,47 +463,29 @@ class VoteRewardService(
 }
 
 private object ArcAuditRewardBridge {
-    private val markMethod = lazy {
-        Class.forName("ru.arc.audit.ExternalEconomyAuditBridge").getMethod(
-            "markExternalReward",
-            UUID::class.java,
-            String::class.java,
-            String::class.java,
-            Double::class.javaPrimitiveType,
-            String::class.java,
-            String::class.java,
-        )
-    }
-    private val cancelMethod = lazy {
-        Class.forName("ru.arc.audit.ExternalEconomyAuditBridge").getMethod("cancel", UUID::class.java, String::class.java)
-    }
+    private val audit by lazy { Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java) }
 
     fun mark(playerId: UUID, component: VoteRewardComponent, rewardId: String): String? = runCatching {
-        markMethod.value.invoke(
-            null,
+        audit?.markExternalReward(
             playerId,
             "voting",
             "vote_reward",
             component.amount.toDouble(),
             if (component.provider == ru.ruscrafting.votes.domain.RewardProvider.VAULT) "vault" else component.currencyId,
             rewardId,
-        ) as String?
+        )
     }.getOrNull()
 
     fun cancel(playerId: UUID, token: String?) {
         if (token == null) return
-        runCatching { cancelMethod.value.invoke(null, playerId, token) }
+        runCatching { audit?.cancelAudit(playerId, token) }
     }
 }
 
 private object ArcProductTelemetryBridge {
-    private val recordMethod = lazy {
-        Class.forName("ru.arc.metrics.ExternalProductTelemetryBridge").getMethod(
-            "recordEvent", UUID::class.java, String::class.java, String::class.java, String::class.java,
-        )
-    }
+    private val telemetry by lazy { Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java) }
 
     fun rewardClaimed(playerId: UUID, operationId: String): Boolean = runCatching {
-        recordMethod.value.invoke(null, playerId, "arcvotes", "vote_reward_claimed", operationId) as Boolean
+        telemetry?.recordEvent(playerId, "arcvotes", "vote_reward_claimed", operationId) == true
     }.getOrDefault(false)
 }
