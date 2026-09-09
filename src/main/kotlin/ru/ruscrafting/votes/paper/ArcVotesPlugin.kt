@@ -158,6 +158,7 @@ class ArcVotesPlugin : JavaPlugin() {
                     },
                 ),
             ).also(ArcVotesReloadController::startInitialHttp)
+            logger.info("ARCVOTES_EVENT public confirmation API enabled (VoteConfirmedEvent)")
 
             val voteMenu = VoteMenu(
                 live::current,
