@@ -464,8 +464,8 @@ class VoteRewardService(
 
 internal object ArcAuditRewardBridge {
     fun mark(playerId: UUID, component: VoteRewardComponent, rewardId: String): String? {
-        if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return null
         return runCatching {
+            if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return@runCatching null
             AvailableArcTelemetry.mark(
                 playerId,
                 component,
@@ -475,8 +475,12 @@ internal object ArcAuditRewardBridge {
     }
 
     fun cancel(playerId: UUID, token: String?) {
-        if (token == null || !Bukkit.getPluginManager().isPluginEnabled("ARC")) return
-        runCatching { AvailableArcTelemetry.cancel(playerId, token) }
+        if (token == null) return
+        runCatching {
+            if (Bukkit.getPluginManager().isPluginEnabled("ARC")) {
+                AvailableArcTelemetry.cancel(playerId, token)
+            }
+        }
     }
 
     private object AvailableArcTelemetry {
@@ -498,8 +502,10 @@ internal object ArcAuditRewardBridge {
 
 internal object ArcProductTelemetryBridge {
     fun rewardClaimed(playerId: UUID, operationId: String): Boolean {
-        if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return false
-        return runCatching { AvailableArcTelemetry.rewardClaimed(playerId, operationId) }.getOrDefault(false)
+        return runCatching {
+            Bukkit.getPluginManager().isPluginEnabled("ARC") &&
+                AvailableArcTelemetry.rewardClaimed(playerId, operationId)
+        }.getOrDefault(false)
     }
 
     private object AvailableArcTelemetry {
