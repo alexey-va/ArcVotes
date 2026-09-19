@@ -462,30 +462,49 @@ class VoteRewardService(
     }
 }
 
-private object ArcAuditRewardBridge {
-    private val audit by lazy { Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java) }
-
-    fun mark(playerId: UUID, component: VoteRewardComponent, rewardId: String): String? = runCatching {
-        audit?.markExternalReward(
-            playerId,
-            "voting",
-            "vote_reward",
-            component.amount.toDouble(),
-            if (component.provider == ru.ruscrafting.votes.domain.RewardProvider.VAULT) "vault" else component.currencyId,
-            rewardId,
-        )
-    }.getOrNull()
+internal object ArcAuditRewardBridge {
+    fun mark(playerId: UUID, component: VoteRewardComponent, rewardId: String): String? {
+        if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return null
+        return runCatching {
+            AvailableArcTelemetry.mark(
+                playerId,
+                component,
+                rewardId,
+            )
+        }.getOrNull()
+    }
 
     fun cancel(playerId: UUID, token: String?) {
-        if (token == null) return
-        runCatching { audit?.cancelAudit(playerId, token) }
+        if (token == null || !Bukkit.getPluginManager().isPluginEnabled("ARC")) return
+        runCatching { AvailableArcTelemetry.cancel(playerId, token) }
+    }
+
+    private object AvailableArcTelemetry {
+        fun mark(playerId: UUID, component: VoteRewardComponent, rewardId: String): String? =
+            Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java)?.markExternalReward(
+                playerId,
+                "voting",
+                "vote_reward",
+                component.amount.toDouble(),
+                if (component.provider == ru.ruscrafting.votes.domain.RewardProvider.VAULT) "vault" else component.currencyId,
+                rewardId,
+            )
+
+        fun cancel(playerId: UUID, token: String) {
+            Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java)?.cancelAudit(playerId, token)
+        }
     }
 }
 
-private object ArcProductTelemetryBridge {
-    private val telemetry by lazy { Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java) }
+internal object ArcProductTelemetryBridge {
+    fun rewardClaimed(playerId: UUID, operationId: String): Boolean {
+        if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return false
+        return runCatching { AvailableArcTelemetry.rewardClaimed(playerId, operationId) }.getOrDefault(false)
+    }
 
-    fun rewardClaimed(playerId: UUID, operationId: String): Boolean = runCatching {
-        telemetry?.recordEvent(playerId, "arcvotes", "vote_reward_claimed", operationId) == true
-    }.getOrDefault(false)
+    private object AvailableArcTelemetry {
+        fun rewardClaimed(playerId: UUID, operationId: String): Boolean =
+            Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java)
+                ?.recordEvent(playerId, "arcvotes", "vote_reward_claimed", operationId) == true
+    }
 }

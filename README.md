@@ -43,4 +43,4 @@ The standalone build resolves the pinned public arc-core release. Add
 `-ParcCoreDir=../arc-core` only when intentionally testing coordinated local
 core changes.
 
-The packaged plugin is `build/libs/ArcVotes-0.4.3.jar`. MySQL integration tests run in CI, not in the local lane.
+The packaged plugin is `build/libs/ArcVotes-0.4.4.jar`. MySQL integration tests run in CI, not in the local lane.
