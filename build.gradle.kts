@@ -111,6 +111,8 @@ tasks {
         // ArcVotes intentionally has no metrics module or listener. arc-core-paper
         // contains an optional collector class, so keep it out of this plugin JAR.
         exclude("ru/arc/metrics/**")
+        exclude("ru/arc/paper/api/**")
+        exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
         exclude("org/slf4j/**")
         exclude("org/bukkit/**")
         exclude("io/papermc/**")
