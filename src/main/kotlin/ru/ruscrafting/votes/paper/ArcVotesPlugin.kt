@@ -17,6 +17,7 @@ import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.observability.StructuredDebugLine
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.sql.PaperSqlServices
 import ru.arc.paper.menu.PaperMenuService
 import ru.arc.sql.SqlRuntime
 import ru.arc.sql.onetime.MySqlOneTimeUseLedger
@@ -65,6 +66,8 @@ class ArcVotesPlugin : JavaPlugin() {
                 lifecycle = it
                 it.start("version" to pluginMeta.version, "server" to settings.serverId)
             }
+            // Register first so reverse-order shutdown closes all SQL stores before releasing its bridge.
+            runtime.own(PaperSqlServices.installConsumer(this))
             val repository = settings.sql?.let { sqlConfig ->
                 val sql = runtime.own(SqlRuntime.create(sqlConfig, "arc-votes-${settings.serverId}")).also { sqlRuntime = it }
                 MySqlVoteRepository(sql).also { repository ->

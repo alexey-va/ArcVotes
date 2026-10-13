@@ -39,6 +39,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - uses: alexey-va/arc-core-public/.github/actions/verify-consumer@7602ccd8b0636147189f3606bdebcd8287b0684b
       - run: ./gradlew --no-daemon test shadowJar --build-cache
+      - name: Retain production plugin JAR
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ArcVotes-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            build/libs/ArcVotes-*.jar
+            !build/libs/*-plain.jar
 
   integration:
     name: MySQL integration
@@ -88,7 +97,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: alexey-va/ARC
-          ref: 005101d40ca7239a0fe8979218ec315e66661806
+          ref: dd15c0e8af4274bd1d626cf96f83880a4af61fc9
           path: e2e-arc
       - name: Build ARC provider dependency
         run: ./gradlew --no-daemon shadowJar
@@ -99,7 +108,9 @@ jobs:
           ARC_VOTES_MONITORING_MINECRAFT_SECRET="$(openssl rand -hex 32)"
           export ARC_VOTES_MONITORING_MINECRAFT_SECRET
           mkdir -p build
-          ./gradlew --no-daemon plugwrightTest -Pe2eArcJar="$PWD/e2e-arc/build/libs/ARC-1.4.3.jar" 2>&1 | tee build/plugwright-e2e.log
+          mapfile -t arc_jars < <(find e2e-arc/build/libs -maxdepth 1 -type f -name 'ARC-*.jar' ! -name '*-plain.jar' -print | sort)
+          test "${#arc_jars[@]}" -eq 1
+          ./gradlew --no-daemon plugwrightTest "-Pe2eArcJar=${arc_jars[0]}" 2>&1 | tee build/plugwright-e2e.log
           git diff --exit-code -- src/test/e2e/package-lock.json
       - name: Upload Paper E2E logs
         if: always()

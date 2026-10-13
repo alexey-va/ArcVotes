@@ -4,7 +4,8 @@ main: ru.ruscrafting.votes.paper.ArcVotesPlugin
 api-version: '1.21.11'
 authors: [RusCrafting]
 description: Authenticated vote callbacks and idempotent rewards
-softdepend: [Vault, RedisEconomy, ARC]
+depend: [ARC]
+softdepend: [Vault, RedisEconomy]
 commands:
   vote:
     description: Open server voting links
