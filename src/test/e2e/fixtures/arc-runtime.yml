@@ -1,0 +1,2 @@
+# Keep real-Paper provider tests independent of ARC's full production modules.
+profile: isolated
