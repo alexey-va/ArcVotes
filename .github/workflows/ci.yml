@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: alexey-va/ARC
-          ref: dd15c0e8af4274bd1d626cf96f83880a4af61fc9
+          ref: 2e76378c7b329fc654cba108bb02cd5bafdb2f22
           path: e2e-arc
       - name: Build ARC provider dependency
         run: ./gradlew --no-daemon shadowJar
