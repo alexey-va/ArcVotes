@@ -1,6 +1,6 @@
 schema = 1
 platform = "paper"
-core_version = "2.7.26"
+core_version = "2.7.28"
 
 capabilities = [
   "health",
