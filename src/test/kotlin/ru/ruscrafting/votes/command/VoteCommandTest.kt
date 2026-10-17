@@ -170,6 +170,15 @@ class VoteCommandTest : StringSpec({
         messages shouldHaveSize 0
         menuOpens shouldBe 1
         vote.onTabComplete(player, command, "vote", arrayOf("")) shouldBe listOf("chat", "gui")
+        vote.onTabComplete(player, command, "vote", arrayOf("check", "")) shouldBe emptyList()
+        every { player.hasPermission("arcvotes.admin.inspect") } returns true
+        every { player.server.onlinePlayers } returns listOf(player)
+        vote.onTabComplete(player, command, "golos", arrayOf("")) shouldBe listOf("chat", "gui", "check", "history")
+        vote.onTabComplete(player, command, "votes", arrayOf("check", "st")) shouldBe listOf("Steve")
+        vote.onTabComplete(player, command, "vote", arrayOf("history", "Steve", "")) shouldBe emptyList()
+        vote.onTabComplete(player, command, "vote", arrayOf("unknown", "")) shouldBe emptyList()
+        every { player.hasPermission("arcvotes.admin.status") } returns true
+        vote.onTabComplete(player, command, "vote", arrayOf("sta")) shouldBe listOf("status")
     }
 
     "an in-flight vote command renders one captured configuration generation" {
