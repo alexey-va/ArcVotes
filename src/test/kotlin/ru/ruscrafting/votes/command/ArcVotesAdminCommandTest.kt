@@ -40,7 +40,7 @@ class ArcVotesAdminCommandTest : StringSpec({
 
         fun execute(result: ArcVotesReloadResult): String {
             messages.clear()
-            val admin = ArcVotesAdminCommand({ runtime }, ArcVotesReloader { result })
+            val admin = ArcVotesAdminCommand({ runtime }, ArcVotesReloader { java.util.concurrent.CompletableFuture.completedFuture(result) })
             admin.onCommand(sender, command, "arcvotes", arrayOf("reload")) shouldBe true
             return PlainTextComponentSerializer.plainText().serialize(messages.single())
         }
@@ -62,7 +62,7 @@ class ArcVotesAdminCommandTest : StringSpec({
         val messages = mutableListOf<Component>()
         every { sender.sendMessage(any<Component>()) } answers { messages += firstArg<Component>() }
         every { sender.hasPermission("arcvotes.admin.reload") } returns false
-        val admin = ArcVotesAdminCommand({ runtime }, ArcVotesReloader { ArcVotesReloadResult.Applied })
+        val admin = ArcVotesAdminCommand({ runtime }, ArcVotesReloader { java.util.concurrent.CompletableFuture.completedFuture(ArcVotesReloadResult.Applied) })
 
         admin.onCommand(sender, command, "arcvotes", arrayOf("reload")) shouldBe true
         PlainTextComponentSerializer.plainText().serialize(messages.single()) shouldBe "Голоса · Недостаточно прав."

@@ -10,6 +10,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Server
 import org.bukkit.entity.Player
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.BudgetedTaskQueue
 import ru.arc.core.TestTaskScheduler
 import ru.arc.network.NetworkPlayerName
 import ru.arc.onetime.OneTimeUseAbandonResult
@@ -42,6 +43,7 @@ import java.time.Instant
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -61,15 +63,45 @@ class VoteRewardServiceTest : FreeSpec({
         }, nanoTime = { nano })
 
         service.start()
+        scheduler.tick(3)
         repository.polledNames.single().map { it.value } shouldContainExactly listOf("OnlineSteve")
-        repeat(16) { scheduler.executeImmediate() }
+        repeat(16) { scheduler.tick() }
         deposited shouldContainExactly listOf("standard", "premium")
         repository.granted shouldContainExactly listOf(event.id)
 
         nano = 5_000_000_000L
         scheduler.advanceMs(5_000)
+        scheduler.tick(3)
         repository.polledNames.size shouldBe 2
         repository.singlePlayerLookups shouldBe 0
+    }
+
+    "poll player capture and another native consumer share one tick budget" {
+        val scheduler = TestTaskScheduler()
+        val tasks = LifecycleTaskScope(scheduler)
+        val work = BudgetedTaskQueue(tasks, maximumSteps = 1)
+        val reads = AtomicInteger()
+        val players = (1..3).map { index -> player("Player$index").also { candidate ->
+            every { candidate.name } answers { reads.incrementAndGet(); "Player$index" }
+        } }
+        val server = mockk<Server>()
+        every { server.onlinePlayers } returns players
+        val repository = RecordingRepository()
+        val service = service(server, scheduler, repository, RecordingLedger(), VoteRewardDepositor { _, _ ->
+            RewardDepositResult.APPLIED
+        }, maximumOnlinePlayerBatch = 3, nativeWork = work)
+        try {
+            service.pollOnlinePlayers()
+            val other = work.call({ true }) { reads.incrementAndGet() }
+            reads.get() shouldBe 0
+            repeat(12) {
+                val before = reads.get()
+                scheduler.tick()
+                (reads.get() - before <= 1) shouldBe true
+            }
+            other.isDone shouldBe true
+            repository.polledNames.single().size shouldBe 3
+        } finally { service.close(); work.close(); tasks.close() }
     }
 
     "a synchronous poll lookup failure does not wedge future polling" {
@@ -83,8 +115,10 @@ class VoteRewardServiceTest : FreeSpec({
         })
 
         service.pollOnlinePlayers()
+        scheduler.tick(3)
         repository.pollFailure = false
         service.pollOnlinePlayers()
+        scheduler.tick(3)
 
         repository.polledNames.size shouldBe 1
     }
@@ -124,7 +158,7 @@ class VoteRewardServiceTest : FreeSpec({
         )
 
         service.deliverPending(player)
-        repeat(16) { scheduler.executeImmediate() }
+        repeat(16) { scheduler.tick() }
 
         confirmed shouldContainExactly listOf(event.id to player.uniqueId)
     }
@@ -152,6 +186,7 @@ class VoteRewardServiceTest : FreeSpec({
             RecordingLedger(),
             live::current,
             Logger.getAnonymousLogger().apply { level = Level.OFF },
+            BudgetedTaskQueue(LifecycleTaskScope(scheduler)),
             LifecycleTaskScope(scheduler),
         )
         val lookup = dailyStatus.find(playerName)
@@ -163,7 +198,7 @@ class VoteRewardServiceTest : FreeSpec({
         )
 
         service.onDurableEvent(event)
-        scheduler.executeImmediate()
+        scheduler.tick()
         historyResult.complete(emptyMap())
 
         lookup.join() shouldBe setOf(MonitoringSource.HOTMC)
@@ -184,7 +219,7 @@ class VoteRewardServiceTest : FreeSpec({
 
         repeat(2) {
             service.pollOnlinePlayers()
-            repeat(16) { scheduler.executeImmediate() }
+            repeat(16) { scheduler.tick() }
         }
         repository.polledNames.map { batch -> batch.map { it.value } } shouldBe
             listOf(listOf("First", "Second"), listOf("Third", "First"))
@@ -194,14 +229,14 @@ class VoteRewardServiceTest : FreeSpec({
         players.removeAt(2)
         players.removeAt(1)
         service.pollOnlinePlayers()
-        scheduler.executeImmediate()
+        scheduler.tick(3)
         repository.polledNames.last().map { it.value } shouldBe listOf("First")
         players.clear()
         service.pollOnlinePlayers()
         repository.polledNames.size shouldBe 3
         players += player("Returned")
         service.pollOnlinePlayers()
-        scheduler.executeImmediate()
+        scheduler.tick(3)
         repository.polledNames.last().map { it.value } shouldBe listOf("Returned")
     }
 
@@ -220,7 +255,7 @@ class VoteRewardServiceTest : FreeSpec({
         })
 
         service.deliverPending(player)
-        repeat(16) { scheduler.executeImmediate() }
+        repeat(16) { scheduler.tick() }
 
         deposited shouldContainExactly listOf("standard", "premium")
         ledger.claimed.map { it.identity.useId }.distinct().size shouldBe 2
@@ -245,7 +280,7 @@ class VoteRewardServiceTest : FreeSpec({
         })
 
         service.deliverPending(player)
-        repeat(16) { scheduler.executeImmediate() }
+        repeat(16) { scheduler.tick() }
 
         deposited shouldContainExactly listOf("premium")
         ledger.committed.size shouldBe 1
@@ -269,7 +304,7 @@ class VoteRewardServiceTest : FreeSpec({
         }, locale)
 
         service.deliverPending(player)
-        repeat(16) { scheduler.executeImmediate() }
+        repeat(16) { scheduler.tick() }
 
         val plain = PlainTextComponentSerializer.plainText()
         messages.flatMap(Component::descendantsAndSelf).any { component ->
@@ -313,11 +348,12 @@ class VoteRewardServiceTest : FreeSpec({
             ledger = ledger,
             live = live::current,
             logger = Logger.getAnonymousLogger().apply { level = Level.OFF },
+            nativeWork = BudgetedTaskQueue(LifecycleTaskScope(scheduler)),
             pollTasks = LifecycleTaskScope(scheduler),
         )
 
         service.deliverPending(player)
-        scheduler.executeImmediate()
+        scheduler.tick(3)
         ledger.claimed.size shouldBe 1
         live.publish(
             live.current().copy(
@@ -328,7 +364,7 @@ class VoteRewardServiceTest : FreeSpec({
             ),
         )
         ledger.completeFirst()
-        repeat(16) { scheduler.executeImmediate() }
+        repeat(16) { scheduler.tick() }
 
         oldDeposits shouldContainExactly listOf("standard", "premium")
         newDeposits shouldBe emptyList()
@@ -368,7 +404,7 @@ class VoteRewardServiceTest : FreeSpec({
         })
 
         service.deliverPending(player)
-        repeat(12) { scheduler.executeImmediate() }
+        repeat(12) { scheduler.tick() }
 
         requests.single().scope shouldBe OneTimeUseScope.parse("spawn")
         repository.recoveries shouldContainExactly listOf(Triple(event.id, player.uniqueId, "claim_recovered"))
@@ -386,6 +422,7 @@ private fun service(
     nanoTime: () -> Long = System::nanoTime,
     maximumOnlinePlayerBatch: Int = 500,
     onConfirmed: (VoteEvent, UUID) -> Unit = { _, _ -> },
+    nativeWork: BudgetedTaskQueue? = null,
 ): VoteRewardService {
     val settings = testSettings()
     every { settings.reward } returns rewardSettings().copy(maximumOnlinePlayerBatch = maximumOnlinePlayerBatch)
@@ -407,6 +444,7 @@ private fun service(
         ledger = ledger,
         live = live::current,
         logger = Logger.getAnonymousLogger().apply { level = Level.OFF },
+        nativeWork = nativeWork ?: BudgetedTaskQueue(LifecycleTaskScope(scheduler)),
         pollTasks = LifecycleTaskScope(scheduler),
         nanoTime = nanoTime,
         onConfirmedEvent = onConfirmed,

@@ -2,7 +2,7 @@ package ru.ruscrafting.votes.reload
 
 /** Applies one already-validated ArcVotes reload attempt. */
 fun interface ArcVotesReloader {
-    fun reload(): ArcVotesReloadResult
+    fun reload(): java.util.concurrent.CompletableFuture<ArcVotesReloadResult>
 }
 
 /** Safe, player-presentable outcomes of an ArcVotes reload attempt. */

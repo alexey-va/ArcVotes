@@ -40,6 +40,52 @@ class VoteDailyStatusServiceTest : FreeSpec({
         queries shouldBe 1
     }
 
+    "concurrent misses can replace a full expired cache without evicting live statuses" {
+        val now = Instant.parse("2026-08-31T12:00:00Z")
+        val clock = MutableClock(now)
+        var delayed = false
+        var queries = 0
+        val pending = linkedMapOf<String, CompletableFuture<Map<MonitoringSource, Instant>>>()
+        val service = VoteDailyStatusService(
+            history = VoteHistoryLookup { player, _, _ ->
+                queries++
+                if (delayed) CompletableFuture<Map<MonitoringSource, Instant>>().also { pending[player.value] = it }
+                else CompletableFuture.completedFuture(mapOf(MonitoringSource.HOTMC to now))
+            },
+            clock = clock, maximumCacheEntries = 10_000,
+        )
+        repeat(10_000) { service.find(NetworkPlayerName.of("Old$it")).join() }
+        clock.current = now.plusSeconds(31)
+        delayed = true
+        val players = (1..100).map { NetworkPlayerName.of("Fresh$it") }
+        val lookups = players.map(service::find)
+        pending.values.forEach { it.complete(mapOf(MonitoringSource.HOTMC to clock.current)) }
+        lookups.forEach { it.join() shouldBe setOf(MonitoringSource.HOTMC) }
+        val before = queries
+        players.forEach { service.find(it).join() shouldBe setOf(MonitoringSource.HOTMC) }
+        queries shouldBe before
+    }
+
+    "expiry index replacement retains a live observed status when old entries expire" {
+        val now = Instant.parse("2026-08-31T23:59:59Z")
+        val clock = MutableClock(now)
+        var queries = 0
+        val service = VoteDailyStatusService(
+            history = VoteHistoryLookup { _, _, _ -> queries++; CompletableFuture.completedFuture(emptyMap()) },
+            clock = clock, cacheTtl = Duration.ofMinutes(5), maximumCacheEntries = 128,
+        )
+        val player = NetworkPlayerName.of("Observed")
+        service.find(player).join()
+        service.observe(voteEvent(MonitoringSource.HOTMC, player, now))
+        clock.current = now.plusSeconds(1)
+        service.find(player).join() shouldBe emptySet()
+        service.observe(voteEvent(MonitoringSource.GAME_MONITORING, player, clock.current))
+        repeat(128) { service.find(NetworkPlayerName.of("Other$it")).join() }
+        val before = queries
+        service.find(player).join() shouldBe setOf(MonitoringSource.GAME_MONITORING)
+        queries shouldBe before
+    }
+
     "pending reward observation augments an already warm cache" {
         val now = Instant.parse("2026-08-31T12:00:00Z")
         val service = VoteDailyStatusService(

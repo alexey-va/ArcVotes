@@ -8,6 +8,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
+import java.util.TreeSet
 import java.util.concurrent.CompletableFuture
 
 /** Caches callback-derived `/vote` availability using each provider's repeat-vote rule. */
@@ -20,6 +21,7 @@ class VoteDailyStatusService(
     private val windows = VoteWindowPolicy()
     private val lock = Any()
     private val cache = linkedMapOf<String, CachedStatus>()
+    private val expirations = TreeSet(compareBy<Expiry>({ it.at }, { it.key }))
     private val inFlight = mutableMapOf<String, PendingLookup>()
 
     init {
@@ -39,7 +41,7 @@ class VoteDailyStatusService(
             cache[key]?.takeIf { now.isBefore(it.expiresAt) }?.let {
                 return CompletableFuture.completedFuture(it.sources)
             }
-            cache.remove(key)
+            removeCachedLocked(key)
             trimExpiredLocked(now)
             inFlight[key]?.let { return it.promise }
             pending = PendingLookup(CompletableFuture())
@@ -90,8 +92,9 @@ class VoteDailyStatusService(
                     windows.activeUntil(source, voteAt)
                 }
                 val expiresAt = minOf(completedAt.plus(cacheTtl), policyExpiry ?: Instant.MAX)
+                trimExpiredLocked(completedAt)
                 if (cache.size < maximumCacheEntries || cache.containsKey(key)) {
-                    cache[key] = CachedStatus(expiresAt, result)
+                    putCachedLocked(key, CachedStatus(expiresAt, result))
                 }
                 inFlight.remove(key)
             }
@@ -109,11 +112,11 @@ class VoteDailyStatusService(
         synchronized(lock) {
             val status = cache[key]
             if (status != null) {
-                if (!now.isBefore(status.expiresAt)) cache.remove(key)
-                else cache[key] = status.copy(
+                if (!now.isBefore(status.expiresAt)) removeCachedLocked(key)
+                else putCachedLocked(key, status.copy(
                     expiresAt = minOf(status.expiresAt, windows.activeUntil(event.vote.source, event.vote.occurredAt)),
                     sources = status.sources + event.vote.source,
-                )
+                ))
             } else {
                 inFlight[key]?.let { pending ->
                     val previous = pending.observed[event.vote.source]
@@ -127,8 +130,21 @@ class VoteDailyStatusService(
 
     private fun trimExpiredLocked(now: Instant) {
         if (cache.size < maximumCacheEntries) return
-        cache.entries.removeIf { (_, status) -> !now.isBefore(status.expiresAt) }
+        val first = if (expirations.isEmpty()) return else expirations.first()
+        if (!now.isBefore(first.at)) removeCachedLocked(first.key)
     }
+
+    private fun removeCachedLocked(key: String) {
+        cache.remove(key)?.let { previous -> expirations.remove(Expiry(previous.expiresAt, key)) }
+    }
+
+    private fun putCachedLocked(key: String, status: CachedStatus) {
+        removeCachedLocked(key)
+        cache[key] = status
+        expirations.add(Expiry(status.expiresAt, key))
+    }
+
+    private data class Expiry(val at: Instant, val key: String)
 
     private data class CachedStatus(val expiresAt: Instant, val sources: Set<MonitoringSource>)
 

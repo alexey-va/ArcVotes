@@ -24,7 +24,10 @@ class ArcVotesAdminCommand(
             return true
         }
 
-        when (val result = runCatching(reloader::reload).getOrDefault(ArcVotesReloadResult.Failed)) {
+        val reload = runCatching(reloader::reload).getOrElse {
+            java.util.concurrent.CompletableFuture.completedFuture(ArcVotesReloadResult.Failed)
+        }
+        reload.thenAccept { result -> when (result) {
             ArcVotesReloadResult.Applied -> {
                 // The reloader publishes before returning Applied, so render with the fresh locale.
                 sender.sendMessage(live().locale.render("commands.reload-success", sender))
@@ -38,7 +41,7 @@ class ArcVotesAdminCommand(
                     mapOf("fields" to Component.text(safeRestartFields(result.fields))),
                 ),
             )
-        }
+        } }
         return true
     }
 

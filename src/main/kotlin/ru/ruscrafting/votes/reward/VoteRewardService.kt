@@ -9,7 +9,8 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerJoinEvent
 import ru.arc.core.LifecycleTaskScope
-import ru.arc.core.whenCompleteSync
+import ru.arc.core.BudgetedTaskQueue
+import java.util.concurrent.CompletableFuture
 import ru.arc.network.NetworkPlayerName
 import ru.arc.observability.StructuredDebugLine
 import ru.arc.onetime.OneTimeUseAbandonResult
@@ -49,10 +50,12 @@ class VoteRewardService(
     private val ledger: OneTimeUseLedger,
     private val live: () -> VoteLiveConfiguration,
     private val logger: Logger,
+    private val nativeWork: BudgetedTaskQueue,
     private val pollTasks: LifecycleTaskScope = LifecycleTaskScope(),
     private val nanoTime: () -> Long = System::nanoTime,
     private val onConfirmedEvent: (VoteEvent, UUID) -> Unit = { _, _ -> },
 ) : Listener, AutoCloseable {
+    private val closed = AtomicBoolean()
     private val activePlayers = ConcurrentHashMap.newKeySet<UUID>()
     private val pollInFlight = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
@@ -74,6 +77,7 @@ class VoteRewardService(
     }
 
     override fun close() {
+        closed.set(true)
         pollTasks.close()
     }
 
@@ -87,17 +91,17 @@ class VoteRewardService(
         runtime.dailyStatus?.observe(event)
         if (event.rewardState != RewardState.PENDING) return
         if (!runtime.settings.reward.enabled) return
-        tasks.runSync {
-            server.onlinePlayers.firstOrNull { it.name.equals(event.vote.playerName.value, ignoreCase = true) }
-                ?.let(::deliverPending)
+        nativeWork.call({ !closed.get() }) {
+            server.getPlayerExact(event.vote.playerName.value)?.takeIf(Player::isOnline)?.let(::deliverPending)
         }
     }
 
     internal fun pollOnlinePlayers() {
         val runtime = live()
         val reward = runtime.settings.reward
-        if (!reward.enabled || !pollInFlight.compareAndSet(false, true)) return
-        val players = server.onlinePlayers.toList()
+        if (closed.get() || !reward.enabled || !pollInFlight.compareAndSet(false, true)) return
+        // This is a reference snapshot only; all per-player native getters run in shared-budget steps.
+        val players = server.onlinePlayers.toTypedArray()
         if (players.isEmpty()) {
             nextPlayerOffset = 0
             pollInFlight.set(false)
@@ -105,35 +109,50 @@ class VoteRewardService(
         }
         val start = nextPlayerOffset % players.size
         val batchSize = minOf(reward.maximumOnlinePlayerBatch, players.size)
-        val online = (0 until batchSize).associate { offset ->
-            val player = players[(start + offset) % players.size]
-            player.name.lowercase(Locale.ROOT) to player
-        }
-        nextPlayerOffset = (start + batchSize) % players.size
-        val names = online.values.mapTo(linkedSetOf()) { NetworkPlayerName.of(it.name) }
-        val lookup = try {
-            repository.findPendingForPlayers(names, reward.maximumPendingPerPlayer)
-        } catch (failure: Throwable) {
-            pollInFlight.set(false)
-            logger.log(Level.WARNING, "Could not start pending vote reward poll", failure)
-            return
-        }
-        lookup
-            .whenCompleteSync(tasks) { pending, failure ->
-                pollInFlight.set(false)
-                if (failure != null) {
-                    logger.log(Level.WARNING, "Could not poll pending vote rewards", failure)
-                    return@whenCompleteSync
+        val online = linkedMapOf<String, Player>()
+        val names = linkedSetOf<NetworkPlayerName>()
+        var offset = 0
+        nativeWork.submit({ !closed.get() }) {
+            if (offset >= batchSize) true else {
+                val player = players[(start + offset++) % players.size]
+                if (player.isOnline) {
+                    val name = player.name
+                    online[name.lowercase(Locale.ROOT)] = player
+                    names += NetworkPlayerName.of(name)
                 }
-                pending.orEmpty().forEach { (normalizedName, events) ->
-                    online[normalizedName]?.let { player -> deliverLoaded(player, events) }
+                false
+            }
+        }.whenComplete { _, captureFailure ->
+            if (captureFailure != null) { pollInFlight.set(false); return@whenComplete }
+            nextPlayerOffset = (start + batchSize) % players.size
+            val lookup = try {
+                repository.findPendingForPlayers(names, reward.maximumPendingPerPlayer)
+            } catch (failure: Throwable) {
+                pollInFlight.set(false)
+                logger.log(Level.WARNING, "Could not start pending vote reward poll", failure)
+                return@whenComplete
+            }
+            lookup.whenCompletePaper(onRejected = { pollInFlight.set(false) }) { pending, failure ->
+                if (failure != null) {
+                    pollInFlight.set(false)
+                    logger.log(Level.WARNING, "Could not poll pending vote rewards", failure)
+                } else {
+                    val deliveries = pending.orEmpty().entries.iterator()
+                    nativeWork.submit({ !closed.get() }) {
+                        if (!deliveries.hasNext()) true else {
+                            val (normalizedName, events) = deliveries.next()
+                            online[normalizedName]?.let { player -> deliverLoaded(player, events) }
+                            false
+                        }
+                    }.whenComplete { _, _ -> pollInFlight.set(false) }
                 }
             }
+        }
     }
 
     fun deliverPending(player: Player) {
         val reward = live().settings.reward
-        if (!reward.enabled || !activePlayers.add(player.uniqueId)) return
+        if (closed.get() || !reward.enabled || !activePlayers.add(player.uniqueId)) return
         val lookup = try {
             repository.findPending(NetworkPlayerName.of(player.name), reward.maximumPendingPerPlayer)
         } catch (failure: Throwable) {
@@ -142,7 +161,7 @@ class VoteRewardService(
             return
         }
         lookup
-            .whenCompleteSync(tasks) { events, failure ->
+            .whenCompletePaper(player.uniqueId) { events, failure ->
                 if (failure != null) {
                     logger.log(Level.WARNING, "Could not load pending vote rewards", failure)
                     finish(player.uniqueId)
@@ -158,7 +177,7 @@ class VoteRewardService(
     }
 
     private fun deliverNextEvent(player: Player, events: List<VoteEvent>, eventIndex: Int) {
-        if (eventIndex >= events.size || !player.isOnline) {
+        if (closed.get() || eventIndex >= events.size || !player.isOnline) {
             finish(player.uniqueId)
             return
         }
@@ -205,7 +224,7 @@ class VoteRewardService(
             claimantId = player.uniqueId,
             scope = scope,
         )
-        ledger.claim(request).whenCompleteSync(tasks) { result, failure ->
+        ledger.claim(request).whenCompletePaper(player.uniqueId) { result, failure ->
             if (failure != null) {
                 logger.log(
                     Level.WARNING,
@@ -213,7 +232,7 @@ class VoteRewardService(
                     failure,
                 )
                 deliverNextEvent(player, events, eventIndex + 1)
-                return@whenCompleteSync
+                return@whenCompletePaper
             }
             when (result) {
                 is OneTimeUseClaimResult.Acquired -> {
@@ -306,7 +325,7 @@ class VoteRewardService(
             releaseAndContinue(player, event, component, claim, events, eventIndex)
             return
         }
-        ledger.commit(claim).whenCompleteSync(tasks) { committed, failure ->
+        ledger.commit(claim).whenCompletePaper(player.uniqueId) { committed, failure ->
             if (failure != null || committed !in setOf(OneTimeUseCommitResult.COMMITTED, OneTimeUseCommitResult.ALREADY_COMMITTED)) {
                 logger.log(
                     Level.SEVERE,
@@ -338,7 +357,7 @@ class VoteRewardService(
         events: List<VoteEvent>,
         eventIndex: Int,
     ) {
-        ledger.release(claim).whenCompleteSync(tasks) { released, failure ->
+        ledger.release(claim).whenCompletePaper(player.uniqueId) { released, failure ->
             if (failure == null && released in setOf(OneTimeUseReleaseResult.RELEASED, OneTimeUseReleaseResult.ALREADY_RELEASED)) {
                 deliverNextEvent(player, events, eventIndex + 1)
             } else {
@@ -356,7 +375,7 @@ class VoteRewardService(
         events: List<VoteEvent>,
         eventIndex: Int,
     ) {
-        ledger.abandon(claim).whenCompleteSync(tasks) { abandoned, failure ->
+        ledger.abandon(claim).whenCompletePaper(player.uniqueId) { abandoned, failure ->
             if (failure == null && abandoned == OneTimeUseAbandonResult.ALREADY_COMMITTED) {
                 deliverNextEvent(player, events, eventIndex + 1)
             } else {
@@ -374,7 +393,7 @@ class VoteRewardService(
         runtime: VoteLiveConfiguration,
         onCompleted: (() -> Unit)? = null,
     ) {
-        repository.markGranted(event.id, player.uniqueId).whenCompleteSync(tasks) { updated, failure ->
+        repository.markGranted(event.id, player.uniqueId).whenCompletePaper(player.uniqueId) { updated, failure ->
             if (failure != null) {
                 logger.log(Level.SEVERE, debug.line("source" to event.vote.source.configKey, "outcome" to "state_unknown"), failure)
             } else if (updated == true) {
@@ -419,7 +438,7 @@ class VoteRewardService(
         events: List<VoteEvent>,
         eventIndex: Int,
     ) {
-        repository.markRecovery(event.id, player.uniqueId, failureCode).whenCompleteSync(tasks) { _, failure ->
+        repository.markRecovery(event.id, player.uniqueId, failureCode).whenCompletePaper(player.uniqueId) { _, failure ->
             if (failure != null) logger.log(Level.SEVERE, "Could not retain vote reward for recovery", failure)
             logger.warning(
                 debug.line(
@@ -430,6 +449,23 @@ class VoteRewardService(
                 ),
             )
             deliverNextEvent(player, events, eventIndex + 1)
+        }
+    }
+
+    private fun <T> CompletableFuture<T>.whenCompletePaper(
+        playerId: UUID? = null,
+        onRejected: () -> Unit = {},
+        callback: (T?, Throwable?) -> Unit,
+    ) {
+        whenComplete { value, failure ->
+            nativeWork.call({ !closed.get() }) { callback(value, failure) }
+                .whenComplete { _, schedulingFailure ->
+                    if (schedulingFailure != null) {
+                        playerId?.let(activePlayers::remove)
+                        onRejected()
+                        if (!closed.get()) logger.log(Level.WARNING, "Vote native continuation was rejected", schedulingFailure)
+                    }
+                }
         }
     }
 

@@ -15,6 +15,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -30,6 +31,7 @@ class ArcVoteHttpServer(
     private val logger: Logger,
 ) : AutoCloseable {
     private val threadSequence = AtomicInteger()
+    private val closed = AtomicBoolean()
     private val executor = ThreadPoolExecutor(
         initialSettings.workerThreads,
         initialSettings.workerThreads,
@@ -45,16 +47,17 @@ class ArcVoteHttpServer(
         { ArcVoteHttpState(settings, ingress) },
         logger,
     )
-    private val server = HttpServer.create(InetSocketAddress(initialSettings.bindAddress, initialSettings.port), 0).apply {
+    private val server = try { HttpServer.create(InetSocketAddress(initialSettings.bindAddress, initialSettings.port), 0).apply {
         executor = this@ArcVoteHttpServer.executor
         createContext("/", ::handle)
-    }
+    } } catch (failure: Throwable) { executor.shutdownNow(); throw failure }
 
     fun start() {
         server.start()
     }
 
     override fun close() {
+        if (!closed.compareAndSet(false, true)) return
         server.stop(1)
         executor.shutdown()
         try {
