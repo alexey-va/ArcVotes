@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "0.4.15"
+version = "0.4.16"
 description = "Authenticated vote callbacks and idempotent rewards for RusCrafting"
 
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { file(it) }

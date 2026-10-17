@@ -52,16 +52,15 @@ import java.util.logging.Level
 
 open class ArcVotesPlugin : JavaPlugin() {
     private var lifecycle: PaperPluginRuntime? = null
-    private class StorageGeneration(val worker: BoundedAsyncExecutor, val callbacks: LifecycleTaskScope) {
-        val nativeWork = BudgetedTaskQueue(callbacks)
-        val drain = CompletableFuture<Unit>()
-        @Volatile var sql: SqlRuntime? = null
-        @Volatile var ledger: MySqlOneTimeUseLedger? = null
-        var reloadController: ArcVotesReloadController? = null
-    }
-    private var generation: StorageGeneration? = null
-    private var predecessor = CompletableFuture.completedFuture(Unit)
-    internal fun drained(): CompletableFuture<Unit> = (generation?.drain ?: predecessor).copy()
+    private lateinit var storage: BoundedAsyncExecutor
+    private lateinit var callbacks: LifecycleTaskScope
+    private lateinit var nativeWork: BudgetedTaskQueue
+    private var sqlRuntime: SqlRuntime? = null
+    private var ledger: MySqlOneTimeUseLedger? = null
+    private var reloadController: ArcVotesReloadController? = null
+    private var sqlBinding: AutoCloseable? = null
+    private var shutdownDrain = CompletableFuture.completedFuture(Unit)
+    internal fun drained(): CompletableFuture<Unit> = shutdownDrain.copy()
 
     private class Prepared(
         val settings: ArcVotesSettings,
@@ -78,27 +77,18 @@ open class ArcVotesPlugin : JavaPlugin() {
             lifecycle = it
             it.start("version" to pluginMeta.version)
         }
-        predecessor.whenCompleteSync(runtime.tasks) { _, failure ->
-            if (lifecycle !== runtime) return@whenCompleteSync
-            if (failure != null) failStartup(failure) else beginGeneration(runtime)
-        }
-    }
-
-    private fun beginGeneration(runtime: PaperPluginRuntime) {
         try {
             PaperArcRuntime.installScheduling(this)
-            val owner = StorageGeneration(BoundedAsyncExecutor("arc-votes-lifecycle"), LifecycleTaskScope(BukkitTaskScheduler(this)))
-            generation = owner
-            runtime.own(PaperSqlServices.installConsumer(this, owner.drain))
-            prepare(owner).whenCompleteSync(runtime.tasks) { prepared, failure ->
-                if (generation !== owner || lifecycle !== runtime) return@whenCompleteSync
-                if (failure != null || prepared == null) failStartup(failure ?: IllegalStateException("Missing vote configuration"))
-                else runCatching { finishEnable(runtime, owner, prepared) }.onFailure(::failStartup)
-            }
+            storage = BoundedAsyncExecutor("arc-votes-storage")
+            callbacks = LifecycleTaskScope(BukkitTaskScheduler(this))
+            nativeWork = BudgetedTaskQueue(callbacks)
+            shutdownDrain = CompletableFuture()
+            sqlBinding = PaperSqlServices.installConsumer(this, shutdownDrain)
+            finishEnable(runtime, prepare().get())
         } catch (failure: Throwable) { failStartup(failure) }
     }
 
-    private fun prepare(owner: StorageGeneration): CompletableFuture<Prepared> = owner.worker.submit {
+    private fun prepare(): CompletableFuture<Prepared> = storage.submit {
             saveDefaultConfig()
             saveResourceIfMissing("lang/ru.yml")
             saveResourceIfMissing("lang/en.yml")
@@ -108,21 +98,21 @@ open class ArcVotesPlugin : JavaPlugin() {
             installLogging(settings)
             val menu = VoteMenuConfiguration.loadFresh(dataPath)
             val repository = settings.sql?.let { sqlConfig ->
-                val sql = SqlRuntime.create(sqlConfig, "arc-votes-${settings.serverId}").also { owner.sql = it }
+                val sql = SqlRuntime.create(sqlConfig, "arc-votes-${settings.serverId}").also { sqlRuntime = it }
                 MySqlVoteRepository(sql).also { repository ->
                     repository.initialize().get(STARTUP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 }
             }
-            val ledger = owner.sql?.let { sql ->
+            val ledger = sqlRuntime?.let { sql ->
                 MySqlOneTimeUseLedger.attach(sql, "arc-votes-${settings.serverId}", MySqlOneTimeUsePartition("vote_reward"))
-                    .also { owner.ledger = it }
+                    .also { this.ledger = it }
             }
             Prepared(settings, locale, menu, repository, ledger)
     }
 
-    private fun finishEnable(runtime: PaperPluginRuntime, owner: StorageGeneration, prepared: Prepared) {
-        val storage = owner.worker
-        val nativeWork = owner.nativeWork
+    private fun finishEnable(runtime: PaperPluginRuntime, prepared: Prepared) {
+        val storage = this.storage
+        val nativeWork = this.nativeWork
         val settings = prepared.settings
         val locale = prepared.locale
         val repository = prepared.repository
@@ -208,7 +198,7 @@ open class ArcVotesPlugin : JavaPlugin() {
                     menuService.closeSessions()
                 },
             ),
-        ).also { owner.reloadController = it }
+        ).also { reloadController = it }
         logger.info("ARCVOTES_EVENT public confirmation API enabled (VoteConfirmedEvent)")
 
         val voteMenu = VoteMenu(
@@ -230,23 +220,16 @@ open class ArcVotesPlugin : JavaPlugin() {
             tabCompleter = adminCommand
         }
         installHealth(runtime, live, activeReloadController)
-        activeReloadController.startInitialHttp().whenComplete { _, failure ->
-            nativeWork.call({ generation === owner && lifecycle === runtime }) {
-                if (failure != null) failStartup(failure)
-                else {
-                    runtime.ready(
-                        "server" to settings.serverId, "http" to settings.http.enabled,
-                        "mysql" to (settings.sql != null), "rewards" to settings.reward.enabled,
-                        "sources" to settings.enabledSources.size,
-                    )
-                    runtime.reportHealthEvery(HEALTH_REPORT_TICKS)
-                    logger.info(debug.line("state" to "ready", "server" to settings.serverId,
-                        "http" to settings.http.enabled, "rewards" to settings.reward.enabled,
-                        "sources" to settings.enabledSources.size))
-                }
-            }
-        }
-
+        activeReloadController.startInitialHttp().get()
+        runtime.ready(
+            "server" to settings.serverId, "http" to settings.http.enabled,
+            "mysql" to (settings.sql != null), "rewards" to settings.reward.enabled,
+            "sources" to settings.enabledSources.size,
+        )
+        runtime.reportHealthEvery(HEALTH_REPORT_TICKS)
+        logger.info(debug.line("state" to "ready", "server" to settings.serverId,
+            "http" to settings.http.enabled, "rewards" to settings.reward.enabled,
+            "sources" to settings.enabledSources.size))
     }
 
     private fun failStartup(failure: Throwable) {
@@ -256,46 +239,45 @@ open class ArcVotesPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
-        val owner = generation
-        generation = null
-        if (owner != null) predecessor = owner.drain
-        val runtime = lifecycle
+        val runtime = lifecycle ?: return
         lifecycle = null
+        val activeSql = sqlRuntime.also { sqlRuntime = null }
+        val activeLedger = ledger.also { ledger = null }
+        val controller = reloadController.also { reloadController = null }
+        val binding = sqlBinding.also { sqlBinding = null }
         var failure: Throwable? = null
         fun attempt(close: () -> Unit) {
             try { close() } catch (error: Throwable) {
-                if (failure == null) failure = error else failure?.addSuppressed(error)
+                if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
             }
         }
-        attempt { owner?.nativeWork?.close() }
-        attempt { owner?.callbacks?.close() }
-        attempt { runtime?.close() }
-        if (owner != null) closeStorage(owner, failure)
+        attempt { if (::nativeWork.isInitialized) nativeWork.close() }
+        attempt { if (::callbacks.isInitialized) callbacks.close() }
+        attempt { runtime.close() }
+        attempt {
+            if (::storage.isInitialized) storage.closeAsync {
+                var terminalFailure: Throwable? = null
+                listOf<() -> Unit>(
+                    { controller?.closePersistence(); Unit },
+                    { activeLedger?.closeAsync()?.join(); Unit },
+                    { activeSql?.executor?.closeAsync()?.join(); Unit },
+                    { activeSql?.close(); Unit },
+                ).forEach { close ->
+                    try { close() } catch (error: Throwable) {
+                        if (terminalFailure == null) terminalFailure = error else if (terminalFailure !== error) terminalFailure.addSuppressed(error)
+                    }
+                }
+                terminalFailure?.let { throw it }
+            }.join()
+        }
+        attempt { binding?.close() }
+        if (failure == null) shutdownDrain.complete(Unit) else {
+            shutdownDrain.completeExceptionally(failure)
+            logger.log(Level.SEVERE, "Could not close ArcVotes storage", failure)
+        }
         sqlReady.set(false)
         ConfigManager.clear()
         Tasks.reset()
-    }
-
-    private fun closeStorage(owner: StorageGeneration, nativeFailure: Throwable?) {
-        owner.worker.closeAsync {
-            var failure = nativeFailure
-            listOf<() -> Unit>(
-                { owner.reloadController?.closePersistence(); Unit },
-                { owner.ledger?.closeAsync()?.join(); Unit },
-                { owner.sql?.executor?.closeAsync()?.join(); Unit },
-                { owner.sql?.close(); Unit },
-            ).forEach { close ->
-                try { close() } catch (error: Throwable) {
-                    if (failure == null) failure = error else if (failure !== error) failure?.addSuppressed(error)
-                }
-            }
-            failure?.let { throw it }
-        }.whenComplete { _, failure ->
-            if (failure == null) owner.drain.complete(Unit) else {
-                owner.drain.completeExceptionally(failure)
-                logger.log(Level.SEVERE, "Could not close ArcVotes storage", failure)
-            }
-        }
     }
 
     private fun installHealth(
