@@ -15,7 +15,6 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -25,13 +24,15 @@ data class ArcVoteHttpState(
 )
 
 /** Loopback-only feature ingress. Public TLS/routing belongs to the managed reverse proxy. */
-class ArcVoteHttpServer(
+class ArcVoteHttpServer internal constructor(
     initialSettings: HttpSettings,
     private val currentState: () -> ArcVoteHttpState,
     private val logger: Logger,
+    createServer: (InetSocketAddress) -> HttpServer,
 ) : AutoCloseable {
     private val threadSequence = AtomicInteger()
-    private val closed = AtomicBoolean()
+    private var closed = false
+    private var closeFailure: IllegalStateException? = null
     private val executor = ThreadPoolExecutor(
         initialSettings.workerThreads,
         initialSettings.workerThreads,
@@ -42,12 +43,16 @@ class ArcVoteHttpServer(
         ThreadPoolExecutor.AbortPolicy(),
     )
 
+    constructor(settings: HttpSettings, currentState: () -> ArcVoteHttpState, logger: Logger) : this(
+        settings, currentState, logger, { HttpServer.create(it, 0) },
+    )
+
     constructor(settings: HttpSettings, ingress: VoteIngressService, logger: Logger) : this(
         settings,
         { ArcVoteHttpState(settings, ingress) },
         logger,
     )
-    private val server = try { HttpServer.create(InetSocketAddress(initialSettings.bindAddress, initialSettings.port), 0).apply {
+    private val server = try { createServer(InetSocketAddress(initialSettings.bindAddress, initialSettings.port)).apply {
         executor = this@ArcVoteHttpServer.executor
         createContext("/", ::handle)
     } } catch (failure: Throwable) { executor.shutdownNow(); throw failure }
@@ -56,15 +61,46 @@ class ArcVoteHttpServer(
         server.start()
     }
 
+    /**
+     * Maintenance-worker only, never an owned HTTP handler or Paper's thread.
+     * Handlers wait for bounded detached ingress persistence, never Paper callbacks.
+     */
+    @Synchronized
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        server.stop(1)
-        executor.shutdown()
+        if (closed) {
+            closeFailure?.let { throw it }
+            return
+        }
+        closed = true
+        var failure: Throwable? = null
+        var interrupted = Thread.interrupted()
+        fun record(error: Throwable) {
+            if (error is InterruptedException) interrupted = true
+            val previous = failure
+            if (previous == null) failure = error else if (previous !== error) previous.addSuppressed(error)
+        }
+        fun attempt(close: () -> Unit) {
+            try { close() } catch (error: Throwable) { record(error) }
+        }
+        fun terminated(): Boolean = try {
+            executor.awaitTermination(5, TimeUnit.SECONDS)
+        } catch (error: InterruptedException) {
+            record(error)
+            false
+        }
+        if (interrupted) record(InterruptedException("ArcVotes HTTP shutdown was already interrupted"))
         try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow()
-        } catch (_: InterruptedException) {
-            executor.shutdownNow()
-            Thread.currentThread().interrupt()
+            attempt { server.stop(1) }
+            if (Thread.interrupted()) record(InterruptedException("ArcVotes HTTP listener shutdown was interrupted"))
+            attempt { executor.shutdown() }
+            if (interrupted || !terminated()) {
+                attempt { executor.shutdownNow() }
+                if (!terminated()) record(IllegalStateException("ArcVotes HTTP callback workers did not terminate"))
+            }
+            closeFailure = failure?.let { IllegalStateException("Could not close ArcVotes HTTP ingress", it) }
+            closeFailure?.let { throw it }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 

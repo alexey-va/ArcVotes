@@ -21,6 +21,7 @@ import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.observability.StructuredDebugLine
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.runtime.PaperPluginHotload
 import ru.arc.paper.sql.PaperSqlServices
 import ru.arc.paper.menu.PaperMenuService
 import ru.arc.sql.SqlRuntime
@@ -72,7 +73,14 @@ open class ArcVotesPlugin : JavaPlugin() {
     private val sqlReady = AtomicBoolean(false)
     private val debug = StructuredDebugLine("ARCVOTES_EVENT")
 
+    private val hotload = PaperPluginHotload(this) {
+        stopRuntime()
+        mapOf("storage" to shutdownDrain)
+    }
+
     override fun onEnable() {
+        hotload.beginGeneration()
+        hotload.register()
         val runtime = PaperPluginRuntime(this, "arc-votes", BukkitTaskScheduler(this)).also {
             lifecycle = it
             it.start("version" to pluginMeta.version)
@@ -239,6 +247,11 @@ open class ArcVotesPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
+        hotload.prepare()
+        hotload.close()
+    }
+
+    private fun stopRuntime() {
         val runtime = lifecycle ?: return
         lifecycle = null
         val activeSql = sqlRuntime.also { sqlRuntime = null }
@@ -251,6 +264,7 @@ open class ArcVotesPlugin : JavaPlugin() {
                 if (failure == null) failure = error else if (failure !== error) failure.addSuppressed(error)
             }
         }
+        attempt { server.servicesManager.unregisterAll(this) }
         attempt { if (::nativeWork.isInitialized) nativeWork.close() }
         attempt { if (::callbacks.isInitialized) callbacks.close() }
         attempt { runtime.close() }
@@ -271,6 +285,8 @@ open class ArcVotesPlugin : JavaPlugin() {
             }.join()
         }
         attempt { binding?.close() }
+        attempt { hotload.retireGameplayRegistrations() }
+        attempt { ru.arc.logging.ArcLogging.close() }
         if (failure == null) shutdownDrain.complete(Unit) else {
             shutdownDrain.completeExceptionally(failure)
             logger.log(Level.SEVERE, "Could not close ArcVotes storage", failure)
