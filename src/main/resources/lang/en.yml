@@ -91,6 +91,6 @@ reward:
   granted:
     - '<prefix> <#fff4e3>Your <site> vote was recorded.</color>'
     - '  <rewards>'
-  component-standard: '<#4de3a2>+<amount></color> <white>💰</white>'
-  component-premium: '<#ffd166>+<amount></color> <white></white>'
+  component-standard: '<#4de3a2>+<amount></color><white>💰</white>'
+  component-premium: '<#ffd166>+<amount></color><white></white>'
   component-spacing: '<white> </white>'

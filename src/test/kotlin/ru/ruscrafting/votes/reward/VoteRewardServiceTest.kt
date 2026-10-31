@@ -311,7 +311,7 @@ class VoteRewardServiceTest : FreeSpec({
             component.color()?.value() == 0xFF5F56 && plain.serialize(component).contains("HotMC")
         } shouldBe true
         val rendered = messages.joinToString("\n") { plain.serialize(it) }
-        rendered.contains("+1000 💰 +3 ") shouldBe true
+        rendered.contains("+1000💰 +3") shouldBe true
         rendered.contains("· +3") shouldBe false
     }
 

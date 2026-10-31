@@ -16,8 +16,8 @@ clusterId: arcvotes-e2e
 defaultCurrencyName: vault
 currencies:
   - currencyName: vault
-    currencySingle: ' 💰'
-    currencyPlural: ' 💰'
+    currencySingle: '💰'
+    currencyPlural: '💰'
     decimalFormat: '#0.00'
     languageTag: en-US
     startingBalance: 0.0
@@ -29,8 +29,8 @@ currencies:
     taxOnlyPay: false
     executorThreads: 1
   - currencyName: tokens
-    currencySingle: ' жет. '
-    currencyPlural: ' жет. '
+    currencySingle: ''
+    currencyPlural: ''
     decimalFormat: '#0.##'
     languageTag: en-US
     startingBalance: 0.0
